@@ -13,6 +13,7 @@ Nexovian (or Nexo) is a personal AI desktop assistant running locally on Ubuntu 
 - **Local LLM Intelligence:** Connects to a local instance of Ollama (using the `qwen3:8b` model by default) to process natural language intents with full privacy.
 - **Desktop Automation:** Capable of controlling the mouse, keyboard, and launching system applications (e.g., VS Code, terminal).
 - **Task Management:** Automatically parses intent to create, read, and manage your local TODO tasks in a simple JSON file.
+- **Persistent Reminders:** Schedule time-aware background alarms that persist across reboots, with 5-minute early warnings.
 - **Strict Security:** Enforces strict permission boundaries, refusing to execute dangerous system operations like `sudo`, `rm -rf /`, or password changes.
 
 ## Prerequisites
@@ -63,6 +64,7 @@ Before installing, ensure your system meets the following requirements:
 - `llm_brain.py`: Manages the system prompts, HTTP requests to the Ollama API, and JSON command parsing.
 - `automation_executor.py`: Defines the safe boundaries and executes system commands, key presses, and mouse movements.
 - `task_manager.py`: Lightweight manager for CRUD operations on your `~/Documents/tasks.json` file.
+- `reminder_manager.py`: Background thread for managing and triggering time-based user reminders.
 - `install_dependencies.sh`: Shell script for bootstrapping a fresh Ubuntu environment.
 
 ## Security Note

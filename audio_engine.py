@@ -10,6 +10,7 @@ import ui_overlay
 engine = pyttsx3.init()
 engine.setProperty('rate', 160)
 speak_lock = threading.Lock()
+active_conversation = False
 
 def speak(text):
     with speak_lock:

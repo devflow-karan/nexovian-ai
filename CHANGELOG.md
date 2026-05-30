@@ -2,6 +2,16 @@
 
 All notable changes to the **Nexovian AI Agent** will be documented in this file.
 
+## [1.4.0] - 2026-05-30
+### Added
+- Persistent Reminders: Time-aware background reminders with 5-minute early warnings, safely surviving system reboots (`reminders.json`).
+- LLM Time Injection: Inject live system time into the system prompt to allow for relative time scheduling ("remind me at 11am").
+- LLM Output Robustness: Added regex-based parsing and one-shot examples for reliable JSON tool extraction from smaller 3B parameter models.
+
+### Fixed
+- Fixed UI locking bug where background threads permanently disabled the microphone by failing to hide the "speaking" overlay.
+- Fixed collision bug where background alerts would interrupt active user conversations. Background reminders now patiently wait for standby mode.
+
 ## [1.3.0] - 2026-05-30
 ### Added
 - Extended AI Context: Upgraded LLM prompts so Nexovian can act as a fully conversational assistant to answer general knowledge questions.

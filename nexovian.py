@@ -57,6 +57,7 @@ def process_interaction(initial_prompt=None):
         if is_running:
             return
         is_running = True
+        audio_engine.active_conversation = True
         
     try:
         if initial_prompt:
@@ -89,6 +90,7 @@ def process_interaction(initial_prompt=None):
         ui_overlay.hide()
         with assistant_lock:
             is_running = False
+            audio_engine.active_conversation = False
 
 def handle_unlock():
     """Interaction flow triggered on unlock."""
@@ -138,6 +140,10 @@ def main():
     
     # Start onboarding thread (which then starts the wake word listener)
     threading.Thread(target=onboarding_flow, daemon=True).start()
+    
+    # Start reminder background checker
+    import reminder_manager
+    reminder_manager.start_background_checker()
     
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()

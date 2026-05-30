@@ -1,10 +1,15 @@
 import requests
 import json
+from datetime import datetime
+import time
+import re
+
 import task_manager
 import automation_executor
+import reminder_manager
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "qwen3:8b" # User requested
+MODEL_NAME = "llama3.2" # Optimized for speed
 
 SYSTEM_PROMPT = """You are Nexovian (Nexovian), a personal AI desktop assistant running locally on Ubuntu 22.04 and Ubuntu 24.04.
 
@@ -33,14 +38,28 @@ Supported actions:
 - {"action": "list_tasks"}
 - {"action": "execute_cmd", "cmd": "bash command"}
 - {"action": "get_weather", "location": "city name or empty for current location"}
+- {"action": "set_reminder", "time": "YYYY-MM-DD HH:MM:SS", "message": "reminder description"}
 
 Only output commands if an action is requested. Otherwise just output text answering the user's questions naturally.
+
+Example Interaction 1:
+User: Remind me today at 3pm to buy milk.
+Nexovian: I will set that reminder for you right now.
+<COMMAND>{"action": "set_reminder", "time": "2026-05-30 15:00:00", "message": "buy milk"}</COMMAND>
+
+Example Interaction 2:
+User: Open visual studio code.
+Nexovian: Opening VS Code now.
+<COMMAND>{"action": "open_app", "app": "vscode"}</COMMAND>
 """
 
 def generate_response(prompt, context=None):
+    now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    system_prompt_with_time = SYSTEM_PROMPT + f"\n\nCurrent System Time: {now_str}\nUse this exact current time to interpret phrases like 'today', 'tomorrow', 'in 5 minutes', or 'at 11am'."
+    
     payload = {
         "model": MODEL_NAME,
-        "prompt": f"{SYSTEM_PROMPT}\n\nUser: {prompt}\nNexovian:",
+        "prompt": f"{system_prompt_with_time}\n\nUser: {prompt}\nNexovian:",
         "stream": False
     }
     
@@ -62,10 +81,9 @@ def process_intent(prompt, context=None):
     
     # Parse for commands
     action_result = ""
-    if "<COMMAND>" in text_response and "</COMMAND>" in text_response:
-        start_idx = text_response.find("<COMMAND>") + len("<COMMAND>")
-        end_idx = text_response.find("</COMMAND>")
-        cmd_str = text_response[start_idx:end_idx].strip()
+    match = re.search(r"<COMMAND>(.*?)</\s*COMMAND>", text_response, re.DOTALL | re.IGNORECASE)
+    if match:
+        cmd_str = match.group(1).strip()
         
         try:
             cmd = json.loads(cmd_str)
@@ -101,9 +119,25 @@ def process_intent(prompt, context=None):
                         action_result = "Currently I am not getting any information regarding the weather."
                 except Exception:
                     action_result = "Currently I am not getting any information regarding the weather."
+            elif action == "set_reminder":
+                time_str = cmd.get("time")
+                msg = cmd.get("message")
+                try:
+                    dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                    ts = dt.timestamp()
+                    now_ts = time.time()
+                    if ts <= now_ts:
+                        now_formatted = datetime.now().strftime("%I:%M %p")
+                        action_result = f"I cannot set a reminder in the past. It is currently {now_formatted}."
+                    else:
+                        reminder_manager.add_reminder(ts, msg)
+                        action_result = f"I have successfully scheduled your reminder for {time_str}."
+                except Exception as e:
+                    action_result = f"Failed to set reminder. Ensure the time format is correct. Error: {e}"
                 
             # Clean up the text response to remove the command block for speech
-            text_response = text_response[:text_response.find("<COMMAND>")].strip()
+            # We remove the entire matched `<COMMAND>...</COMMAND>` string
+            text_response = text_response.replace(match.group(0), "").strip()
             
         except json.JSONDecodeError:
             action_result = "Failed to parse command from AI."
