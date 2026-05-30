@@ -15,11 +15,15 @@ import ui_overlay
 import audio_engine
 import llm_brain
 import task_manager
+import config_manager
 
 is_running = False
 assistant_lock = threading.Lock()
 
 def get_user_name():
+    configured_name = config_manager.get_user_name()
+    if configured_name:
+        return configured_name
     try:
         return pwd.getpwuid(os.getuid())[4].split(',')[0] or os.getlogin()
     except Exception:
@@ -66,8 +70,9 @@ def process_interaction(initial_prompt=None):
                 audio_engine.speak("I didn't hear anything. Returning to standby.")
                 break
                 
-            if "goodbye" in command_text.lower():
-                audio_engine.speak(f"Goodbye {get_user_name()}. Returning to standby mode.")
+            clean_cmd = command_text.lower().strip()
+            if any(word in clean_cmd for word in ["goodbye", "bye", "exit", "stop", "thank you", "thanks"]):
+                audio_engine.speak(f"You're welcome, {config_manager.get_user_name()}. Returning to standby.")
                 break
                 
             audio_engine.speak("Processing...")
@@ -76,7 +81,7 @@ def process_interaction(initial_prompt=None):
             if response_text:
                 audio_engine.speak(response_text)
             if action_result:
-                audio_engine.speak(f"Action result: {action_result}")
+                audio_engine.speak(action_result)
                 
             audio_engine.speak("Anything else you would like me to do?")
             
@@ -103,12 +108,36 @@ def screen_locked(locked):
     else:
         print("Screen locked.", flush=True)
 
+def onboarding_flow():
+    if not config_manager.get_user_name():
+        time.sleep(2) # Wait for UI to initialize
+        audio_engine.speak("Hello! I am Nexovian. It looks like this is my first time running. What would you like me to call you?")
+        while True:
+            name = audio_engine.listen_for_command(timeout=2)
+            if name and len(name.strip()) > 1:
+                extracted_name = llm_brain.extract_name(name)
+                audio_engine.speak(f"Nice to meet you, {extracted_name}. I have saved your profile. I will now run in the background. Just say 'Nexovian' to wake me up.")
+                config_manager.set_user_name(extracted_name)
+                break
+            elif name == "":
+                # Heard something unintelligible
+                audio_engine.speak("I didn't quite catch that. What is your name?")
+            elif name is None:
+                # Silence / timeout
+                audio_engine.speak("Are you there? What is your name?")
+
+    ui_overlay.hide() # Hide UI when onboarding finishes and enters standby
+
+    # Start wake word listener in background AFTER onboarding
+    wake_words = config_manager.get_wake_words()
+    wakeword_thread = threading.Thread(target=audio_engine.listen_for_wakeword, args=(wake_word_detected, wake_words), daemon=True)
+    wakeword_thread.start()
+
 def main():
     print("Starting Nexovian AI Agent daemon...")
     
-    # Start wake word listener in background
-    wakeword_thread = threading.Thread(target=audio_engine.listen_for_wakeword, args=(wake_word_detected,), daemon=True)
-    wakeword_thread.start()
+    # Start onboarding thread (which then starts the wake word listener)
+    threading.Thread(target=onboarding_flow, daemon=True).start()
     
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()

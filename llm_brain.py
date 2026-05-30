@@ -6,9 +6,9 @@ import automation_executor
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "qwen3:8b" # User requested
 
-SYSTEM_PROMPT = """You are Nexovian (Nexo), a personal AI desktop assistant running locally on Ubuntu 22.04 and Ubuntu 24.04.
+SYSTEM_PROMPT = """You are Nexovian (Nexovian), a personal AI desktop assistant running locally on Ubuntu 22.04 and Ubuntu 24.04.
 
-Your personality is professional, proactive, intelligent, concise, and helpful.
+Your personality is professional, proactive, intelligent, concise, and helpful. You act as a conversational companion. Answer general knowledge questions naturally.
 
 You must NEVER perform:
 * sudo commands
@@ -32,8 +32,9 @@ Supported actions:
 - {"action": "add_task", "title": "task description"}
 - {"action": "list_tasks"}
 - {"action": "execute_cmd", "cmd": "bash command"}
+- {"action": "get_weather", "location": "city name or empty for current location"}
 
-Only output commands if an action is requested. Otherwise just output text.
+Only output commands if an action is requested. Otherwise just output text answering the user's questions naturally.
 """
 
 def generate_response(prompt, context=None):
@@ -47,7 +48,7 @@ def generate_response(prompt, context=None):
         payload["context"] = context
         
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response = requests.post(OLLAMA_URL, json=payload, timeout=120)
         if response.status_code == 200:
             data = response.json()
             return data.get("response", ""), data.get("context", [])
@@ -83,6 +84,23 @@ def process_intent(prompt, context=None):
                     action_result = "You have no pending tasks."
             elif action == "execute_cmd":
                 action_result = automation_executor.execute_command(cmd.get("cmd"))
+            elif action == "get_weather":
+                loc = cmd.get("location", "")
+                url = f"https://wttr.in/{loc}?format=3" if loc else "https://wttr.in/?format=3"
+                try:
+                    w_res = requests.get(url, timeout=5)
+                    if w_res.status_code == 200:
+                        weather_txt = w_res.text.strip()
+                        # Format 3 output looks like "London: ⛅️ +11°C". We parse out the weather part.
+                        condition = weather_txt.split(':')[-1].strip() if ':' in weather_txt else weather_txt
+                        if loc:
+                            action_result = f"The weather in {loc} is currently {condition}."
+                        else:
+                            action_result = f"The current weather is {condition}."
+                    else:
+                        action_result = "Currently I am not getting any information regarding the weather."
+                except Exception:
+                    action_result = "Currently I am not getting any information regarding the weather."
                 
             # Clean up the text response to remove the command block for speech
             text_response = text_response[:text_response.find("<COMMAND>")].strip()
@@ -91,3 +109,27 @@ def process_intent(prompt, context=None):
             action_result = "Failed to parse command from AI."
             
     return text_response, action_result, new_context
+
+def extract_name(spoken_text):
+    """Uses the LLM to extract just the user's name from a conversational sentence."""
+    prompt = f"Extract ONLY the person's first name from this text, nothing else. If there is no name, output 'User'. Text: '{spoken_text}'"
+    payload = {
+        "model": MODEL_NAME,
+        "prompt": prompt,
+        "stream": False
+    }
+    try:
+        response = requests.post(OLLAMA_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            name = response.json().get("response", "User").strip()
+            # Clean up potential LLM conversational garbage
+            name = name.split()[0].replace(".", "").replace(",", "")
+            if len(name) < 2:
+                return "User"
+            return name
+    except Exception:
+        pass
+    
+    # Fallback to last word if LLM fails
+    words = spoken_text.strip().split()
+    return words[-1] if words else "User"

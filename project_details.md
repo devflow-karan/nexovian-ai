@@ -1,7 +1,7 @@
 # Nexovian AI Agent - Project Details
 
-## Overview
-Nexovian is a local, privacy-focused desktop automation assistant designed exclusively for Ubuntu Linux environments. It bridges the gap between powerful local Large Language Models (LLMs) and local desktop operations, ensuring all data, speech, and task logic remains entirely on your machine.
+## Overview (v1.3.0)
+Nexovian is a local, privacy-focused desktop automation and conversational assistant designed exclusively for Ubuntu Linux environments. It bridges the gap between powerful local Large Language Models (LLMs) and local desktop scripting, giving users a voice-controlled interface to interact with the OS and the internet seamlessly. entirely on your machine.
 
 ## Architecture & Core Modules
 The system is built on a modular, multi-threaded Python 3 architecture:

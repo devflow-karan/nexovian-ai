@@ -1,12 +1,14 @@
-# Nexovian AI Agent (v1.1.0)
+# Nexovian AI Agent (v1.3.0)
 
 Nexovian (or Nexo) is a personal AI desktop assistant running locally on Ubuntu (22.04 and 24.04). It acts as an interactive desktop automation daemon that operates in the background, listening for wake words and responding intelligently to natural language commands.
 
 ## Features
 
+- **Conversational & Weather API:** Ask general knowledge questions or get live weather updates, fully parsed and delivered through natural conversation.
+- **Custom User Profiles:** Nexovian asks for your preferred name using conversational AI parsing and remembers it persistently (`~/.config/nexovian`).
 - **Animated UI Overlay:** A transparent, pulsing visual interface appears dynamically when Nexovian is listening or speaking, providing clear visual feedback.
 - **Auto-Start:** Automatically launches in the background when you log into your Ubuntu session.
-- **Wake Word Detection:** Continuously listens for the wake words "Hey Nexovian" or "Hey Nexo" (powered by openWakeWord).
+- **Vosk Custom Wake Words:** Continuously listens for custom wake words like "Nexo" or "Nexovian" with zero cloud dependency.
 - **System Unlock Greetings:** Integrates with the GNOME ScreenSaver via DBus to automatically greet you when you unlock your machine.
 - **Local LLM Intelligence:** Connects to a local instance of Ollama (using the `qwen3:8b` model by default) to process natural language intents with full privacy.
 - **Desktop Automation:** Capable of controlling the mouse, keyboard, and launching system applications (e.g., VS Code, terminal).

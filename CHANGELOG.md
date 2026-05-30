@@ -2,6 +2,28 @@
 
 All notable changes to the **Nexovian AI Agent** will be documented in this file.
 
+## [1.3.0] - 2026-05-30
+### Added
+- Extended AI Context: Upgraded LLM prompts so Nexovian can act as a fully conversational assistant to answer general knowledge questions.
+- Weather Tool API: Added live integration with `wttr.in` to allow Nexovian to check and verbally report real-time weather.
+- Intelligent Name Parsing: During onboarding, the LLM now intelligently extracts just the user's first name from full conversational sentences.
+
+### Fixed
+- Reverted identity branding from Orion back to Nexovian.
+- Increased the STT `pause_threshold` to 2.5 seconds to prevent the assistant from interrupting the user mid-sentence while they think.
+
+## [1.2.0] - 2026-05-30
+### Added
+- Name configuration onboarding flow (`config.json`).
+- Switched to Vosk for reliable custom wake words ("Nexovian" / "Nexovian").
+- Implemented phonetic fallbacks for dictionary-based wake word matching.
+- Added quick exits for conversational enders ("thank you", "goodbye") to bypass LLM processing time.
+
+### Fixed
+- Addressed infinite feedback loop caused by STT silence timeouts.
+- Resolved ALSA microphone stream collision between background wake word and active STT.
+- Fixed GTK UI overlay state attribute error.
+
 ## [1.1.0] - 2026-05-30
 ### Added
 - Animated GTK3 UI overlay for visualizing listening and speaking states.
