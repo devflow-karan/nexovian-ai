@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Exec=/usr/bin/python3 /data/projects/2026/todo-app/ubuntu-unlock-assistant/nexovian.py
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Nexovian AI Agent
+Comment=Desktop automation AI that listens for unlock and wake words
