@@ -92,8 +92,18 @@ def process_interaction(initial_prompt=None):
             is_running = False
             audio_engine.active_conversation = False
 
+last_unlock_time = 0
+
 def handle_unlock():
     """Interaction flow triggered on unlock."""
+    global last_unlock_time
+    current_time = time.time()
+    
+    with assistant_lock:
+        if is_running or current_time - last_unlock_time < 15:
+            return
+        last_unlock_time = current_time
+        
     time.sleep(2)
     greet_and_read_tasks()
     process_interaction()
@@ -104,6 +114,7 @@ def wake_word_detected():
         process_interaction(initial_prompt=f"Yes {get_user_name()}, how can I help you?")
 
 def screen_locked(locked):
+    audio_engine.set_system_locked(locked)
     if not locked:
         print("Screen unlocked. Triggering assistant.", flush=True)
         threading.Thread(target=handle_unlock, daemon=True).start()
@@ -127,6 +138,10 @@ def onboarding_flow():
             elif name is None:
                 # Silence / timeout
                 audio_engine.speak("Are you there? What is your name?")
+    else:
+        print("Profile exists. Triggering initial startup greeting.", flush=True)
+        time.sleep(2)
+        threading.Thread(target=handle_unlock, daemon=True).start()
 
     ui_overlay.hide() # Hide UI when onboarding finishes and enters standby
 
@@ -137,6 +152,12 @@ def onboarding_flow():
 
 def main():
     print("Starting Nexovian AI Agent daemon...")
+    
+    import subprocess
+    try:
+        subprocess.run(["pkill", "-f", "unlock_assistant.py"], check=False)
+    except Exception:
+        pass
     
     # Start onboarding thread (which then starts the wake word listener)
     threading.Thread(target=onboarding_flow, daemon=True).start()
@@ -162,6 +183,7 @@ def main():
         Gtk.main()
     except KeyboardInterrupt:
         print("Exiting...")
+        os._exit(0)
 
 if __name__ == '__main__':
     main()

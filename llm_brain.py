@@ -9,9 +9,11 @@ import automation_executor
 import reminder_manager
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "llama3.2" # Optimized for speed
+MODEL_NAME = "qwen3:8b"
 
 SYSTEM_PROMPT = """You are Nexovian (Nexovian), a personal AI desktop assistant running locally on Ubuntu 22.04 and Ubuntu 24.04.
+
+If anyone asks about your identity or who made you, you must explicitly reply that Karan made you and you are Nexovian.
 
 Your personality is professional, proactive, intelligent, concise, and helpful. You act as a conversational companion. Answer general knowledge questions naturally.
 
@@ -39,6 +41,7 @@ Supported actions:
 - {"action": "execute_cmd", "cmd": "bash command"}
 - {"action": "get_weather", "location": "city name or empty for current location"}
 - {"action": "set_reminder", "time": "YYYY-MM-DD HH:MM:SS", "message": "reminder description"}
+- {"action": "write_file", "filename": "name.txt", "content": "text or code to write"}
 
 Only output commands if an action is requested. Otherwise just output text answering the user's questions naturally.
 
@@ -54,7 +57,7 @@ Nexovian: Opening VS Code now.
 """
 
 def generate_response(prompt, context=None):
-    now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    now_str = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
     system_prompt_with_time = SYSTEM_PROMPT + f"\n\nCurrent System Time: {now_str}\nUse this exact current time to interpret phrases like 'today', 'tomorrow', 'in 5 minutes', or 'at 11am'."
     
     payload = {
@@ -67,7 +70,7 @@ def generate_response(prompt, context=None):
         payload["context"] = context
         
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=120)
+        response = requests.post(OLLAMA_URL, json=payload, timeout=300)
         if response.status_code == 200:
             data = response.json()
             return data.get("response", ""), data.get("context", [])
@@ -134,6 +137,13 @@ def process_intent(prompt, context=None):
                         action_result = f"I have successfully scheduled your reminder for {time_str}."
                 except Exception as e:
                     action_result = f"Failed to set reminder. Ensure the time format is correct. Error: {e}"
+            elif action == "write_file":
+                filename = cmd.get("filename")
+                content = cmd.get("content")
+                if filename and content is not None:
+                    action_result = automation_executor.write_file(filename, content)
+                else:
+                    action_result = "Failed to write file. Filename or content missing."
                 
             # Clean up the text response to remove the command block for speech
             # We remove the entire matched `<COMMAND>...</COMMAND>` string
@@ -153,7 +163,7 @@ def extract_name(spoken_text):
         "stream": False
     }
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=10)
+        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
         if response.status_code == 200:
             name = response.json().get("response", "User").strip()
             # Clean up potential LLM conversational garbage

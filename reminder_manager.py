@@ -47,7 +47,7 @@ def check_reminders_loop():
                 
                 # Check 5 minute warning
                 if r["state"] == "pending" and time_diff <= 300 and time_diff > 0:
-                    while audio_engine.active_conversation:
+                    while audio_engine.active_conversation or getattr(audio_engine, 'is_system_locked', False):
                         time.sleep(2)
                     audio_engine.speak(f"Reminder in 5 minutes: {r['message']}")
                     ui_overlay.hide()
@@ -56,7 +56,7 @@ def check_reminders_loop():
                     
                 # Check exact time or overdue
                 elif r["state"] in ["pending", "notified_5m"] and time_diff <= 0:
-                    while audio_engine.active_conversation:
+                    while audio_engine.active_conversation or getattr(audio_engine, 'is_system_locked', False):
                         time.sleep(2)
                     audio_engine.speak(f"Reminder: {r['message']}")
                     ui_overlay.hide()

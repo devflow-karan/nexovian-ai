@@ -7,17 +7,35 @@ import sys
 import json
 import ui_overlay
 
+# Try to load the robotic voice engine
+try:
+    import robotic_voice
+    USE_ROBOTIC_VOICE = True
+    print("[audio_engine] Robotic voice engine loaded.", flush=True)
+except Exception as _e:
+    USE_ROBOTIC_VOICE = False
+    print(f"[audio_engine] Robotic voice unavailable, using pyttsx3: {_e}", flush=True)
+
+# pyttsx3 fallback engine
 engine = pyttsx3.init()
 engine.setProperty('rate', 160)
 speak_lock = threading.Lock()
 active_conversation = False
+is_system_locked = False
+
+def set_system_locked(locked):
+    global is_system_locked
+    is_system_locked = locked
 
 def speak(text):
     with speak_lock:
         ui_overlay.show_state("speaking")
         print(f"Nexovian: {text}", flush=True)
-        engine.say(text)
-        engine.runAndWait()
+        if USE_ROBOTIC_VOICE:
+            robotic_voice.speak_robotic(text)
+        else:
+            engine.say(text)
+            engine.runAndWait()
         time.sleep(0.5)
 
 def listen_for_command(timeout=10, phrase_time_limit=15):
@@ -69,7 +87,7 @@ def listen_for_wakeword(callback, wake_words=["nexovian"]):
         print(f"Listening for wake words: {', '.join(wake_words)}...")
         
         while True:
-            if ui_overlay.get_ui().active:
+            if ui_overlay.get_ui().active or is_system_locked:
                 if stream.is_active():
                     stream.stop_stream()
                 time.sleep(0.5)
@@ -84,7 +102,10 @@ def listen_for_wakeword(callback, wake_words=["nexovian"]):
                 text = res.get('text', '')
                 if text:
                     print(f"Vosk heard (standby): '{text}'")
-                    for w in wake_words:
+                    import datetime
+                    today_day = datetime.datetime.now().strftime("%A").lower()
+                    dynamic_wake_words = wake_words + [today_day, f"hey {today_day}"]
+                    for w in dynamic_wake_words:
                         if w in text:
                             print(f"Wake word '{w}' detected!")
                             callback()

@@ -52,3 +52,18 @@ def type_text(text):
 def press_key(key):
     pyautogui.press(key)
     return f"Pressed key: {key}"
+
+def write_file(filename, content):
+    """Write text or code to a file in the Documents folder."""
+    try:
+        documents_path = os.path.expanduser("~/Documents")
+        os.makedirs(documents_path, exist_ok=True)
+        # Prevent path traversal
+        clean_filename = os.path.basename(filename)
+        file_path = os.path.join(documents_path, clean_filename)
+        
+        with open(file_path, "w") as f:
+            f.write(content)
+        return f"Successfully created and wrote to {clean_filename} in your Documents folder."
+    except Exception as e:
+        return f"Failed to write file: {str(e)}"
