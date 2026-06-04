@@ -40,6 +40,8 @@ def speak(text):
 
 def listen_for_command(timeout=10, phrase_time_limit=15):
     """Listens to the microphone and returns recognized text."""
+    if is_system_locked:
+        return None
     r = sr.Recognizer()
     r.energy_threshold = 1000 # Static threshold to avoid recalibration delay
     r.dynamic_energy_threshold = True

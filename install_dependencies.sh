@@ -7,7 +7,7 @@ sudo apt-get install -y python3-dbus python3-gi python3-gi-cairo gir1.2-gtk-3.0 
 
 echo "Installing Python packages..."
 # Use --break-system-packages for Ubuntu 24.04 compatibility or use a venv. We'll install to user directory.
-pip3 install --user dbus-python PyGObject pyttsx3 vosk sounddevice SpeechRecognition pyaudio openwakeword pyautogui ollama requests || pip3 install --break-system-packages --user dbus-python PyGObject pyttsx3 vosk sounddevice SpeechRecognition pyaudio openwakeword pyautogui ollama requests
+pip3 install --user dbus-python PyGObject pyttsx3 vosk sounddevice SpeechRecognition pyaudio openwakeword pyautogui ollama requests pynput || pip3 install --break-system-packages --user dbus-python PyGObject pyttsx3 vosk sounddevice SpeechRecognition pyaudio openwakeword pyautogui ollama requests pynput
 
 # Install Ollama if not installed
 if ! command -v ollama &> /dev/null; then

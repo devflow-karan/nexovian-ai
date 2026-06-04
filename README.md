@@ -1,4 +1,4 @@
-# Nexovian AI Agent (v1.3.0)
+# Nexovian AI Agent (v1.5.0)
 
 Nexovian (or Nexo) is a personal AI desktop assistant running locally on Ubuntu (22.04 and 24.04). It acts as an interactive desktop automation daemon that operates in the background, listening for wake words and responding intelligently to natural language commands.
 
@@ -14,6 +14,8 @@ Nexovian (or Nexo) is a personal AI desktop assistant running locally on Ubuntu 
 - **Desktop Automation:** Capable of controlling the mouse, keyboard, and launching system applications (e.g., VS Code, terminal).
 - **Task Management:** Automatically parses intent to create, read, and manage your local TODO tasks in a simple JSON file.
 - **Persistent Reminders:** Schedule time-aware background alarms that persist across reboots, with 5-minute early warnings.
+- **Robotic Voice:** Uses `espeak` + ring modulation to produce an AI-sounding robotic voice. Falls back to `pyttsx3` if unavailable.
+- **Typed Input (Bottom Bar):** Press **Ctrl+Space** from any application to open a Raycast-style floating bottom bar. Type commands directly and see a scrollable chat history of your conversation. Voice and typed inputs are unified in the same log.
 - **Strict Security:** Enforces strict permission boundaries, refusing to execute dangerous system operations like `sudo`, `rm -rf /`, or password changes.
 
 ## Prerequisites
@@ -22,6 +24,7 @@ Before installing, ensure your system meets the following requirements:
 - **Operating System:** Ubuntu 22.04 or 24.04
 - **Python:** Python 3.10+
 - **Hardware:** Sufficient RAM and CPU to run local LLMs (8GB RAM minimum, 16GB+ recommended).
+- **Global Hotkey support:** `pynput` requires an X11 session (XWayland is sufficient). See [Wayland note](#wayland-note) below.
 
 ## Installation
 
@@ -56,16 +59,31 @@ Before installing, ensure your system meets the following requirements:
 2. **Interact with Nexovian**
    - **On system unlock:** When you enter your password and unlock Ubuntu, Nexovian will automatically greet you and read your pending tasks.
    - **Voice commands:** You can say "Hey Nexovian" followed by a command (e.g., "Open VS Code", "Create a task to write documentation").
+   - **Typed commands (Bottom Bar):** Press **Ctrl+Space** from anywhere to open the floating bottom bar. Type your command and press **Enter** or click **Send**. Press **Ctrl+Space** or **Escape** to dismiss.
 
 ## Project Structure
 
-- `nexovian.py`: The main daemon entry point managing the DBus session and background threads.
+- `nexovian.py`: The main daemon entry point managing the DBus session, background threads, and global hotkey listener.
 - `audio_engine.py`: Handles microphone input, openWakeWord listening, and Text-to-Speech (TTS).
+- `text_input_ui.py`: The Raycast-style typed-input bottom bar. GTK3 window with scrollable chat history, activated by Ctrl+Space.
+- `ui_overlay.py`: Transparent pulsing overlay for visual listening/speaking feedback.
 - `llm_brain.py`: Manages the system prompts, HTTP requests to the Ollama API, and JSON command parsing.
 - `automation_executor.py`: Defines the safe boundaries and executes system commands, key presses, and mouse movements.
 - `task_manager.py`: Lightweight manager for CRUD operations on your `~/Documents/tasks.json` file.
 - `reminder_manager.py`: Background thread for managing and triggering time-based user reminders.
+- `robotic_voice.py`: espeak-based TTS post-processor that applies ring modulation + echo for a robotic AI voice.
 - `install_dependencies.sh`: Shell script for bootstrapping a fresh Ubuntu environment.
+
+## Wayland Note
+
+`pynput` (used for the Ctrl+Space global hotkey) requires an X11 display server. On most Ubuntu 22.04/24.04 installs, **XWayland is enabled by default** and `pynput` works correctly. If you are running a pure Wayland session without XWayland, the hotkey will not register and a warning will be printed to the console. As an alternative, you can register the shortcut manually:
+```bash
+gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings \
+  "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nexovian/']"
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nexovian/ name 'Nexovian Toggle'
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nexovian/ command 'python3 -c "import text_input_ui; text_input_ui.toggle_bar()"'
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nexovian/ binding '<Control>space'
+```
 
 ## Security Note
 Nexovian is built with a restricted environment paradigm. Even if a user asks the agent to delete critical system files or use root access, the `automation_executor.py` explicitly blocks those commands to prevent accidental or malicious destruction of the host system.

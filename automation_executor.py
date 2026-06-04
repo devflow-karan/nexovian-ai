@@ -24,7 +24,44 @@ def execute_command(cmd_str):
     except Exception as e:
         return f"Error executing command: {str(e)}"
 
-def open_application(app_name):
+def resolve_project_path(path_str):
+    if not path_str:
+        return None
+        
+    from datetime import datetime
+    current_year = str(datetime.now().year)
+    base_dir = f"/data/projects/{current_year}"
+    
+    # If path_str is absolute, use it (ensuring it is resolved safely)
+    if os.path.isabs(path_str):
+        return os.path.normpath(path_str)
+        
+    # Check if directory exists in the current year's projects folder
+    path_in_year = os.path.join(base_dir, path_str)
+    if os.path.exists(path_in_year):
+        return os.path.normpath(path_in_year)
+        
+    # Check in /data/projects generally
+    path_in_projects = os.path.join("/data/projects", path_str)
+    if os.path.exists(path_in_projects):
+        return os.path.normpath(path_in_projects)
+        
+    # Check in home directory
+    path_in_home = os.path.expanduser(f"~/{path_str}")
+    if os.path.exists(path_in_home):
+        return os.path.normpath(path_in_home)
+        
+    # Otherwise, default to current year's projects folder and create it
+    try:
+        os.makedirs(path_in_year, exist_ok=True)
+        return os.path.normpath(path_in_year)
+    except Exception:
+        # Fallback to home documents if permission error in /data/projects
+        docs_fallback = os.path.expanduser(f"~/Documents/{path_str}")
+        os.makedirs(docs_fallback, exist_ok=True)
+        return os.path.normpath(docs_fallback)
+
+def open_application(app_name, path=None):
     # Try to use xdg-open or gtk-launch
     # Simplest approach for ubuntu is to run the app name if it's in path, or gtk-launch
     app_name_lower = app_name.lower().replace(" ", "")
@@ -39,8 +76,22 @@ def open_application(app_name):
     
     cmd = mappings.get(app_name_lower, app_name_lower)
     
+    if path:
+        resolved_path = resolve_project_path(path)
+        if cmd == "code":
+            cmd = f"code {resolved_path}"
+        elif cmd == "gnome-terminal":
+            cmd = f"gnome-terminal --working-directory={resolved_path}"
+        elif cmd == "nautilus":
+            cmd = f"nautilus {resolved_path}"
+        else:
+            # For other apps, pass path as argument
+            cmd = f"{cmd} {resolved_path}"
+    
     try:
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if path:
+            return f"Opening {app_name} at {path}."
         return f"Opening {app_name}."
     except Exception as e:
         return f"Failed to open {app_name}: {str(e)}"
@@ -54,16 +105,35 @@ def press_key(key):
     return f"Pressed key: {key}"
 
 def write_file(filename, content):
-    """Write text or code to a file in the Documents folder."""
+    """Write text or code to a file inside the /data/projects/<current_year>/ folder."""
     try:
-        documents_path = os.path.expanduser("~/Documents")
-        os.makedirs(documents_path, exist_ok=True)
-        # Prevent path traversal
-        clean_filename = os.path.basename(filename)
-        file_path = os.path.join(documents_path, clean_filename)
+        from datetime import datetime
+        current_year = str(datetime.now().year)
+        base_dir = f"/data/projects/{current_year}"
         
-        with open(file_path, "w") as f:
-            f.write(content)
-        return f"Successfully created and wrote to {clean_filename} in your Documents folder."
+        # Clean path to prevent escaping outside directories
+        # Allow subdirectory files, e.g. "abc/main.py"
+        safe_path = os.path.normpath(filename).lstrip("/")
+        while safe_path.startswith("../") or safe_path == "..":
+            safe_path = safe_path[3:]
+            
+        file_path = os.path.join(base_dir, safe_path)
+        
+        # Fallback if base_dir is not writable or doesn't exist
+        try:
+            dir_path = os.path.dirname(file_path)
+            os.makedirs(dir_path, exist_ok=True)
+            with open(file_path, "w") as f:
+                f.write(content)
+            return f"Successfully created and wrote to {safe_path} in {base_dir}."
+        except Exception:
+            # Fallback to Documents folder
+            fallback_base = os.path.expanduser("~/Documents")
+            file_path = os.path.join(fallback_base, safe_path)
+            dir_path = os.path.dirname(file_path)
+            os.makedirs(dir_path, exist_ok=True)
+            with open(file_path, "w") as f:
+                f.write(content)
+            return f"Successfully created and wrote to {safe_path} in your Documents folder (fallback)."
     except Exception as e:
         return f"Failed to write file: {str(e)}"
