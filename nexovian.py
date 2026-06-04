@@ -6,6 +6,7 @@ import time
 import threading
 
 import dbus
+import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 import gi
 gi.require_version('Gtk', '3.0')
@@ -20,6 +21,16 @@ import text_input_ui
 
 is_running = False
 assistant_lock = threading.Lock()
+
+class NexovianDBusService(dbus.service.Object):
+    def __init__(self):
+        bus_name = dbus.service.BusName('org.nexovian.Agent', bus=dbus.SessionBus())
+        super().__init__(bus_name, '/org/nexovian/Agent')
+
+    @dbus.service.method('org.nexovian.Agent', in_signature='', out_signature='')
+    def WakeUp(self):
+        log_message("D-Bus WakeUp method called. Triggering voice interaction.")
+        threading.Thread(target=wake_word_detected, daemon=True).start()
 
 def log_message(msg):
     from datetime import datetime
@@ -218,9 +229,38 @@ def _start_hotkey_listener():
         print("[nexovian] Install pynput: pip3 install pynput", flush=True)
 
 
+def login1_session_locked():
+    screen_locked(True)
+
+def login1_session_unlocked():
+    screen_locked(False)
+
 def main():
+    # Setup D-Bus main loop and check for existing instance
+    DBusGMainLoop(set_as_default=True)
+    session_bus = dbus.SessionBus()
+    
+    if session_bus.name_has_owner('org.nexovian.Agent'):
+        try:
+            remote_object = session_bus.get_object('org.nexovian.Agent', '/org/nexovian/Agent')
+            interface = dbus.Interface(remote_object, 'org.nexovian.Agent')
+            interface.WakeUp()
+            print("Nexovian daemon is already running. Sent WakeUp signal.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Failed to communicate with running daemon: {e}")
+            sys.exit(1)
+
     print("Starting Nexovian AI Agent daemon...")
     
+    # Claim name and register service
+    try:
+        global dbus_service
+        dbus_service = NexovianDBusService()
+        print("Successfully registered org.nexovian.Agent D-Bus service.")
+    except Exception as e:
+        print(f"Could not register D-Bus service: {e}")
+
     import subprocess
     try:
         subprocess.run(["pkill", "-f", "unlock_assistant.py"], check=False)
@@ -240,11 +280,9 @@ def main():
     import reminder_manager
     reminder_manager.start_background_checker()
     
-    DBusGMainLoop(set_as_default=True)
-    bus = dbus.SessionBus()
-    
+    # Session Bus ScreenSaver listener
     try:
-        bus.add_signal_receiver(
+        session_bus.add_signal_receiver(
             screen_locked,
             dbus_interface='org.gnome.ScreenSaver',
             signal_name='ActiveChanged'
@@ -252,6 +290,23 @@ def main():
         print("Successfully attached to org.gnome.ScreenSaver D-Bus signals.")
     except Exception as e:
         print(f"Could not attach to ScreenSaver signal: {e}")
+
+    # System Bus logind listener for lock/unlock redundancy
+    try:
+        system_bus = dbus.SystemBus()
+        system_bus.add_signal_receiver(
+            login1_session_locked,
+            dbus_interface='org.freedesktop.login1.Session',
+            signal_name='Lock'
+        )
+        system_bus.add_signal_receiver(
+            login1_session_unlocked,
+            dbus_interface='org.freedesktop.login1.Session',
+            signal_name='Unlock'
+        )
+        print("Successfully attached to org.freedesktop.login1.Session signals.")
+    except Exception as e:
+        print(f"Could not attach to logind signals: {e}")
 
     try:
         Gtk.main()
