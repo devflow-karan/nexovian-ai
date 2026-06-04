@@ -17,14 +17,14 @@ import numpy as np
 
 
 # ─── Tunable parameters ──────────────────────────────────────────────────────
-ESPEAK_VOICE    = "en"          # espeak voice
-ESPEAK_SPEED    = 140           # words per minute (slower = more robotic feel)
-ESPEAK_PITCH    = 30            # 0-99, lower = deeper
+ESPEAK_VOICE    = "en-us"       # espeak voice
+ESPEAK_SPEED    = 155           # words per minute (slower = more robotic feel)
+ESPEAK_PITCH    = 25            # 0-99, lower = deeper
 ESPEAK_AMPLITUDE = 180          # 0-200
-RING_FREQ       = 80.0          # Hz for ring modulator carrier (buzz frequency)
-RING_MIX        = 0.65          # 0=dry, 1=full ring-mod
-ECHO_DELAY_MS   = 35            # ms of metallic echo
-ECHO_DECAY      = 0.30          # echo volume multiplier
+RING_FREQ       = 200.0         # Hz for ring modulator carrier (buzz frequency)
+RING_MIX        = 0.25          # 0=dry, 1=full ring-mod
+ECHO_DELAY_MS   = 15            # ms of metallic echo
+ECHO_DECAY      = 0.10          # echo volume multiplier
 # ─────────────────────────────────────────────────────────────────────────────
 
 

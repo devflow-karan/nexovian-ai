@@ -64,7 +64,7 @@ def greet_and_read_tasks():
     else:
         audio_engine.speak("You have no pending tasks.")
         
-    audio_engine.speak("Would you like me to create a new task, review your schedule, or perform any action?")
+    audio_engine.speak("Have a great day!")
 
 def process_interaction(initial_prompt=None):
     global is_running
@@ -135,7 +135,7 @@ last_unlock_time = 0
 
 def handle_unlock():
     """Interaction flow triggered on unlock."""
-    global last_unlock_time
+    global last_unlock_time, is_running
     current_time = time.time()
     
     with assistant_lock:
@@ -143,16 +143,22 @@ def handle_unlock():
             log_message(f"handle_unlock skipped. is_running: {is_running}, dt: {current_time - last_unlock_time:.1f}s")
             return
         last_unlock_time = current_time
+        is_running = True
         
-    log_message("Triggering unlock flow: waiting 2s...")
-    time.sleep(2)
-    # Double check that we didn't lock the system again in these 2 seconds
-    if audio_engine.is_system_locked:
-        log_message("System locked during time.sleep. Aborting unlock greeting.")
-        return
-        
-    greet_and_read_tasks()
-    process_interaction()
+    try:
+        log_message("Triggering unlock flow: waiting 2s...")
+        time.sleep(2)
+        # Double check that we didn't lock the system again in these 2 seconds
+        if audio_engine.is_system_locked:
+            log_message("System locked during time.sleep. Aborting unlock greeting.")
+            return
+            
+        greet_and_read_tasks()
+    finally:
+        ui_overlay.hide()
+        with assistant_lock:
+            is_running = False
+            log_message("Returned to standby state after unlock greeting.")
 
 def wake_word_detected():
     log_message("Wake word callback triggered.")
