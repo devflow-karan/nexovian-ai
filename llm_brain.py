@@ -117,7 +117,62 @@ Nexovian: Scrolling down and analyzing the screen content.
 <COMMAND>{"action": "read_screen", "instruction": "Explain what is on the screen"}</COMMAND>
 """
 
+def generate_response_gemini(prompt, context=None):
+    import config_manager
+    api_key = config_manager.get_gemini_api_key()
+    if not api_key:
+        return "Gemini API key is not configured.", context
+
+    now_str = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
+    system_prompt_with_time = SYSTEM_PROMPT + f"\n\nCurrent System Time: {now_str}\nUse this exact current time to interpret phrases like 'today', 'tomorrow', 'in 5 minutes', or 'at 11am'."
+
+    # Context in Gemini mode is a list of message dictionaries:
+    # [{"role": "user"|"model", "parts": [{"text": "..."}]}]
+    if not isinstance(context, list):
+        context = []
+
+    # Append the new user prompt
+    new_context = list(context)
+    new_context.append({
+        "role": "user",
+        "parts": [{"text": prompt}]
+    })
+
+    # Prepare payload
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": new_context,
+        "systemInstruction": {
+            "parts": [{"text": system_prompt_with_time}]
+        }
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                if text_content:
+                    # Append model response to context
+                    new_context.append({
+                        "role": "model",
+                        "parts": [{"text": text_content}]
+                    })
+                    return text_content, new_context
+            return "Gemini returned an empty response.", context
+        else:
+            return f"Gemini API returned error code {resp.status_code}: {resp.text}", context
+    except Exception as e:
+        return f"Error communicating with Gemini API: {str(e)}", context
+
 def generate_response(prompt, context=None):
+    import config_manager
+    if config_manager.use_gemini_brain():
+        return generate_response_gemini(prompt, context)
+
     now_str = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
     system_prompt_with_time = SYSTEM_PROMPT + f"\n\nCurrent System Time: {now_str}\nUse this exact current time to interpret phrases like 'today', 'tomorrow', 'in 5 minutes', or 'at 11am'."
     
@@ -127,7 +182,8 @@ def generate_response(prompt, context=None):
         "stream": False
     }
     
-    if context:
+    # Context in Ollama mode is a list of token integers
+    if context and isinstance(context, list) and all(isinstance(x, int) for x in context):
         payload["context"] = context
         
     try:

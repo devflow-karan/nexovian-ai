@@ -50,3 +50,8 @@ def set_gemini_api_key(key):
     config = load_config()
     config["gemini_api_key"] = key
     save_config(config)
+
+def use_gemini_brain():
+    config = load_config()
+    has_key = bool(config.get("gemini_api_key"))
+    return config.get("use_gemini_brain", has_key)
