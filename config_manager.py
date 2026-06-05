@@ -41,3 +41,12 @@ def set_wake_words(words_list):
     config = load_config()
     config["wake_words"] = [w.lower() for w in words_list]
     save_config(config)
+
+def get_gemini_api_key():
+    config = load_config()
+    return config.get("gemini_api_key")
+
+def set_gemini_api_key(key):
+    config = load_config()
+    config["gemini_api_key"] = key
+    save_config(config)

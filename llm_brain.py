@@ -89,6 +89,8 @@ Supported actions:
 - {"action": "get_weather", "location": "city name or empty for current location"}
 - {"action": "set_reminder", "time": "YYYY-MM-DD HH:MM:SS", "message": "reminder description"}
 - {"action": "write_file", "filename": "relative_path/name.py", "content": "text or code to write"} (Writes content to a file inside /data/projects/<current_year>/. Automatically creates parent directories if needed.)
+- {"action": "scroll", "direction": "up" | "down", "amount": 300} (Scrolls the screen by the specified clicks/units)
+- {"action": "read_screen", "instruction": "instructions"} (Captures a screenshot of the user's screen and explains it or answers questions based on it)
 
 Only output commands if an action is requested. Otherwise just output text answering the user's questions naturally.
 
@@ -102,6 +104,17 @@ Example Interaction 2:
 User: Go to the project_alpha folder and open it in VS Code.
 Nexovian: Opening the project_alpha folder in VS Code now.
 <COMMAND>{"action": "open_app", "app": "vscode", "path": "project_alpha"}</COMMAND>
+
+Example Interaction 3:
+User: What's on my screen?
+Nexovian: I will take a screenshot and explain it for you.
+<COMMAND>{"action": "read_screen", "instruction": "Explain what is on the screen"}</COMMAND>
+
+Example Interaction 4:
+User: Scroll down and explain my screen.
+Nexovian: Scrolling down and analyzing the screen content.
+<COMMAND>{"action": "scroll", "direction": "down", "amount": 500}</COMMAND>
+<COMMAND>{"action": "read_screen", "instruction": "Explain what is on the screen"}</COMMAND>
 """
 
 def generate_response(prompt, context=None):
@@ -201,6 +214,10 @@ def process_intent(prompt, context=None):
                     res = automation_executor.write_file(filename, content)
                 else:
                     res = "Failed to write file. Filename or content missing."
+            elif action == "scroll":
+                res = automation_executor.scroll(cmd.get("direction", "down"), cmd.get("amount", 300))
+            elif action == "read_screen":
+                res = automation_executor.read_screen(cmd.get("instruction", "Explain what is on the screen"))
                 
             if res:
                 action_results.append(res)
@@ -215,6 +232,19 @@ def process_intent(prompt, context=None):
             
     action_result = " ".join(action_results)
     return text_response, action_result, new_context
+
+def parse_action_result(action_result):
+    """Parse action result into (display_text, spoken_text)."""
+    if not action_result:
+        return "", ""
+    if "[SPOKEN]:" in action_result and "[DISPLAY]:" in action_result:
+        try:
+            spoken_part = action_result.split("[SPOKEN]:")[1].split("[DISPLAY]:")[0].strip()
+            display_part = action_result.split("[DISPLAY]:")[1].strip()
+            return display_part, spoken_part
+        except Exception:
+            pass
+    return action_result, action_result
 
 def extract_name(spoken_text):
     """Uses the LLM to extract just the user's name from a conversational sentence."""

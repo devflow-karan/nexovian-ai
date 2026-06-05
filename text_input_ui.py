@@ -339,19 +339,28 @@ class NexovianBar(Gtk.Window):
             response_text, action_result, new_context = llm.process_intent(text, self._context)
             self._context = new_context
 
-            full_reply = ""
+            display_action, spoken_action = llm.parse_action_result(action_result)
+
+            full_display = ""
             if response_text:
-                full_reply += response_text
-            if action_result:
-                full_reply += (" " if full_reply else "") + action_result
+                full_display += response_text
+            if display_action:
+                full_display += (" " if full_display else "") + display_action
 
-            if not full_reply:
-                full_reply = "(No response)"
+            if not full_display:
+                full_display = "(No response)"
 
-            GLib.idle_add(self._add_message, "Nexovian", full_reply)
+            GLib.idle_add(self._add_message, "Nexovian", full_display)
 
-            # Speak the response
-            threading.Thread(target=audio.speak, args=(full_reply,), daemon=True).start()
+            # Speak the spoken response
+            full_speak = ""
+            if response_text:
+                full_speak += response_text
+            if spoken_action:
+                full_speak += (" " if full_speak else "") + spoken_action
+
+            if full_speak:
+                threading.Thread(target=audio.speak, args=(full_speak,), daemon=True).start()
 
         except Exception as e:
             GLib.idle_add(self._add_message, "Nexovian", f"[Error: {e}]")

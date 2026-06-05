@@ -121,17 +121,22 @@ def process_interaction(initial_prompt=None):
             audio_engine.speak("Processing...")
             response_text, action_result, context = llm_brain.process_intent(command_text, context)
 
-            full_reply = ""
-            if response_text:
-                full_reply += response_text
-                audio_engine.speak(response_text)
-            if action_result:
-                full_reply += (" " if full_reply else "") + action_result
-                audio_engine.speak(action_result)
+            display_action, spoken_action = llm_brain.parse_action_result(action_result)
 
-            # Mirror spoken response in the text bar (if visible)
-            if full_reply:
-                text_input_ui.append_spoken("Nexovian", full_reply)
+            if response_text:
+                audio_engine.speak(response_text)
+            if spoken_action:
+                audio_engine.speak(spoken_action)
+
+            # Mirror response + display part of action in the text bar (if visible)
+            full_reply_display = ""
+            if response_text:
+                full_reply_display += response_text
+            if display_action:
+                full_reply_display += (" " if full_reply_display else "") + display_action
+
+            if full_reply_display:
+                text_input_ui.append_spoken("Nexovian", full_reply_display)
 
             audio_engine.speak("Anything else you would like me to do?")
             
