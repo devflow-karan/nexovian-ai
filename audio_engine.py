@@ -23,6 +23,20 @@ speak_lock = threading.Lock()
 active_conversation = False
 is_system_locked = False
 
+def _get_user_name():
+    try:
+        import config_manager
+        name = config_manager.get_user_name()
+        if name:
+            return name
+    except Exception:
+        pass
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid())[4].split(',')[0] or os.getlogin()
+    except Exception:
+        return "User"
+
 def set_system_locked(locked):
     global is_system_locked
     is_system_locked = locked
@@ -54,7 +68,7 @@ def listen_for_command(timeout=10, phrase_time_limit=15):
             try:
                 audio = r.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
                 text = r.recognize_google(audio)
-                print(f"Recognized: {text}")
+                print(f"{_get_user_name()}: {text}")
                 # Reject garbage / very short sounds
                 if len(text.strip()) < 2:
                     return ""
