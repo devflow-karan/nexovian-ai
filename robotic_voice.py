@@ -14,6 +14,29 @@ import subprocess
 import tempfile
 import math
 import numpy as np
+import threading
+
+active_proc = None
+proc_lock = threading.Lock()
+is_cancelled = False
+
+def cancel_active_speech():
+    global is_cancelled, active_proc
+    with proc_lock:
+        is_cancelled = True
+        if active_proc:
+            try:
+                active_proc.terminate()
+                active_proc.kill()
+            except Exception:
+                pass
+            active_proc = None
+
+def reset_cancellation():
+    global is_cancelled
+    with proc_lock:
+        is_cancelled = False
+
 
 
 # ─── Tunable parameters ──────────────────────────────────────────────────────
@@ -22,9 +45,9 @@ ESPEAK_SPEED    = 155           # words per minute (slower = more robotic feel)
 ESPEAK_PITCH    = 25            # 0-99, lower = deeper
 ESPEAK_AMPLITUDE = 180          # 0-200
 RING_FREQ       = 200.0         # Hz for ring modulator carrier (buzz frequency)
-RING_MIX        = 0.25          # 0=dry, 1=full ring-mod
+RING_MIX        = 0.12          # 0=dry, 1=full ring-mod (reduced for clarity)
 ECHO_DELAY_MS   = 15            # ms of metallic echo
-ECHO_DECAY      = 0.10          # echo volume multiplier
+ECHO_DECAY      = 0.05          # echo volume multiplier (reduced for clarity)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -110,37 +133,75 @@ def speak_robotic(text: str):
     Main entry point. Converts text → robotic audio and plays it.
     Falls back to plain espeak if anything goes wrong.
     """
+    global active_proc
+    with proc_lock:
+        if is_cancelled:
+            return
+
     tmp_dir = tempfile.gettempdir()
     raw_wav  = os.path.join(tmp_dir, "nexo_raw.wav")
     robo_wav = os.path.join(tmp_dir, "nexo_robot.wav")
 
     try:
         # Step 1: TTS → WAV
-        _espeak_to_wav(text, raw_wav)
+        with proc_lock:
+            if is_cancelled:
+                return
+            active_proc = subprocess.Popen(
+                [
+                    "espeak",
+                    "-v", ESPEAK_VOICE,
+                    "-s", str(ESPEAK_SPEED),
+                    "-p", str(ESPEAK_PITCH),
+                    "-a", str(ESPEAK_AMPLITUDE),
+                    "-w", raw_wav,
+                    text,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        active_proc.wait()
+        
+        with proc_lock:
+            active_proc = None
+            if is_cancelled:
+                return
 
         # Step 2: Apply robotic FX
         _process_wav(raw_wav, robo_wav)
 
         # Step 3: Play
-        subprocess.run(
-            ["aplay", "-q", robo_wav],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        with proc_lock:
+            if is_cancelled:
+                return
+            active_proc = subprocess.Popen(
+                ["aplay", "-q", robo_wav],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        active_proc.wait()
 
     except Exception as e:
+        with proc_lock:
+            if is_cancelled:
+                return
         print(f"[robotic_voice] Fallback to plain espeak: {e}", flush=True)
         try:
-            subprocess.run(
-                ["espeak", "-v", ESPEAK_VOICE, "-s", str(ESPEAK_SPEED),
-                 "-p", str(ESPEAK_PITCH), text],
-                check=False,
-            )
+            with proc_lock:
+                if is_cancelled:
+                    return
+                active_proc = subprocess.Popen(
+                    ["espeak", "-v", ESPEAK_VOICE, "-s", str(ESPEAK_SPEED),
+                     "-p", str(ESPEAK_PITCH), text],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            active_proc.wait()
         except Exception:
             pass
-
     finally:
+        with proc_lock:
+            active_proc = None
         for f in (raw_wav, robo_wav):
             try:
                 os.remove(f)

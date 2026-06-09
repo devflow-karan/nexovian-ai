@@ -29,12 +29,7 @@ def set_user_name(name):
 def get_wake_words():
     config = load_config()
     # Provide an exhaustive list of known phonetic misinterpretations from the Vosk lightweight model
-    default_words = [
-        "nexovian", "nexo", "neck so", "next oh", "next so", "neck so the end", "next oh the end",
-        "come on agent", "come on a agent", "come on a don't", 
-        "come on a and", "come on a dent", "come on his hand", 
-        "gone in and", "come on i didn't", "come on isn't", "hello isn't"
-    ]
+    default_words = ["nexovian", "nexo", "hey", "hello"]
     return config.get("wake_words", default_words)
 
 def set_wake_words(words_list):
@@ -55,3 +50,7 @@ def use_gemini_brain():
     config = load_config()
     has_key = bool(config.get("gemini_api_key"))
     return config.get("use_gemini_brain", has_key)
+
+def use_robotic_voice():
+    config = load_config()
+    return config.get("use_robotic_voice", True)

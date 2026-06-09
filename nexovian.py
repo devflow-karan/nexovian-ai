@@ -68,12 +68,16 @@ def greet_and_read_tasks():
         
     log_message(f"Speaking unlock greeting to {name}")
     audio_engine.speak(f"{greeting} {name}. Your system is ready.")
+    if audio_engine.is_system_locked:
+        return
     
     tasks = task_manager.get_pending_tasks()
     if tasks:
         audio_engine.speak(f"You currently have {len(tasks)} pending tasks.")
     else:
         audio_engine.speak("You have no pending tasks.")
+    if audio_engine.is_system_locked:
+        return
         
     audio_engine.speak("Have a great day!")
 
@@ -119,14 +123,22 @@ def process_interaction(initial_prompt=None):
             text_input_ui.append_spoken("You (voice)", command_text)
 
             audio_engine.speak("Processing...")
+            if audio_engine.is_system_locked:
+                break
             response_text, action_result, context = llm_brain.process_intent(command_text, context)
+            if audio_engine.is_system_locked:
+                break
 
             display_action, spoken_action = llm_brain.parse_action_result(action_result)
 
             if response_text:
                 audio_engine.speak(response_text)
+            if audio_engine.is_system_locked:
+                break
             if spoken_action:
                 audio_engine.speak(spoken_action)
+            if audio_engine.is_system_locked:
+                break
 
             # Mirror response + display part of action in the text bar (if visible)
             full_reply_display = ""
@@ -182,12 +194,22 @@ def wake_word_detected():
         process_interaction(initial_prompt=f"Yes {get_user_name()}, how can I help you?")
 
 def screen_locked(locked):
+    global last_unlock_time
     audio_engine.set_system_locked(locked)
     if not locked:
         log_message("Screen unlocked. Triggering assistant.")
         threading.Thread(target=handle_unlock, daemon=True).start()
     else:
         log_message("Screen locked.")
+        last_unlock_time = 0
+        try:
+            ui_overlay.hide()
+        except Exception:
+            pass
+        try:
+            text_input_ui.hide_bar()
+        except Exception:
+            pass
 
 def onboarding_flow():
     if not config_manager.get_user_name():
@@ -272,8 +294,10 @@ def main():
     except Exception:
         pass
     
-    # Initialise the text input bar widget on the GTK main thread
-    GLib.idle_add(lambda: text_input_ui.get_bar() or False)
+    def init_bar():
+        text_input_ui.get_bar()
+        return False
+    GLib.idle_add(init_bar)
 
     # Start global Ctrl+Space hotkey listener
     threading.Thread(target=_start_hotkey_listener, daemon=True).start()

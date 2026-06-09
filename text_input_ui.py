@@ -336,7 +336,12 @@ class NexovianBar(Gtk.Window):
             llm = _get_llm()
             audio = _get_audio()
 
+            if audio.is_system_locked:
+                return
+
             response_text, action_result, new_context = llm.process_intent(text, self._context)
+            if audio.is_system_locked:
+                return
             self._context = new_context
 
             display_action, spoken_action = llm.parse_action_result(action_result)
@@ -350,6 +355,8 @@ class NexovianBar(Gtk.Window):
             if not full_display:
                 full_display = "(No response)"
 
+            if audio.is_system_locked:
+                return
             GLib.idle_add(self._add_message, "Nexovian", full_display)
 
             # Speak the spoken response
@@ -360,10 +367,13 @@ class NexovianBar(Gtk.Window):
                 full_speak += (" " if full_speak else "") + spoken_action
 
             if full_speak:
+                if audio.is_system_locked:
+                    return
                 threading.Thread(target=audio.speak, args=(full_speak,), daemon=True).start()
 
         except Exception as e:
-            GLib.idle_add(self._add_message, "Nexovian", f"[Error: {e}]")
+            if not audio.is_system_locked:
+                GLib.idle_add(self._add_message, "Nexovian", f"[Error: {e}]")
         finally:
             GLib.idle_add(self._set_busy, False)
 
@@ -377,6 +387,17 @@ class NexovianBar(Gtk.Window):
 
     def hide_bar(self):
         self.hide()
+        try:
+            import ui_overlay
+            ui_overlay.hide()
+        except Exception:
+            pass
+        try:
+            audio = _get_audio()
+            audio.set_system_locked(True)
+            audio.set_system_locked(False)
+        except Exception:
+            pass
 
     def toggle_bar(self):
         if self.get_visible():

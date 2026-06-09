@@ -22,10 +22,19 @@ MODEL_DIR = os.path.expanduser("~/.local/share/vosk-models/vosk-model-small-en-u
 engine = pyttsx3.init()
 engine.setProperty('rate', 160)
 
+is_system_locked = False
+active_microphone_source = None
+microphone_lock = threading.Lock()
+
 def speak(text):
+    if is_system_locked:
+        return
     print(f"Assistant: {text}", flush=True)
-    engine.say(text)
-    engine.runAndWait()
+    try:
+        engine.say(text)
+        engine.runAndWait()
+    except Exception:
+        pass
     time.sleep(0.5) # Wait for room echo to dissipate
 
 # Initialize Vosk Model (done lazily to avoid blocking start up if not needed, but better to load once)
@@ -43,18 +52,30 @@ import speech_recognition as sr
 
 def listen(timeout=10):
     """Listens to the microphone and returns recognized text using SpeechRecognition + Vosk."""
+    global active_microphone_source
+    if is_system_locked:
+        return ""
     print("Listening...", flush=True)
     r = sr.Recognizer()
     try:
         with sr.Microphone(sample_rate=16000) as source:
-            # Briefly adjust for ambient noise
-            r.adjust_for_ambient_noise(source, duration=0.5)
-            # Listen for a phrase
+            with microphone_lock:
+                if is_system_locked:
+                    return ""
+                active_microphone_source = source
+            
             try:
-                audio = r.listen(source, timeout=timeout, phrase_time_limit=15)
-            except sr.WaitTimeoutError:
-                print("Listening timeout.")
-                return ""
+                # Briefly adjust for ambient noise
+                r.adjust_for_ambient_noise(source, duration=0.5)
+                # Listen for a phrase
+                try:
+                    audio = r.listen(source, timeout=timeout, phrase_time_limit=15)
+                except sr.WaitTimeoutError:
+                    print("Listening timeout.")
+                    return ""
+            finally:
+                with microphone_lock:
+                    active_microphone_source = None
             
             # Feed raw audio data to Vosk
             rec = vosk.KaldiRecognizer(model, 16000)
@@ -88,7 +109,11 @@ def read_tasks():
         
     speak(f"You have {len(tasks)} tasks.")
     for i, task in enumerate(tasks):
+        if is_system_locked:
+            return
         speak(f"Task {i+1}: {task}")
+    if is_system_locked:
+        return
     speak("Finished reading tasks.")
 
 is_running = False
@@ -106,11 +131,17 @@ def handle_unlock():
     try:
         # Add a small delay to ensure audio system is ready after unlock
         time.sleep(2)
+        if is_system_locked:
+            return
         name = get_user_name()
         speak(f"Welcome {name}. Do you want to create a task, or listen to your saved tasks?")
+        if is_system_locked:
+            return
         
         response = listen(timeout=7).lower()
         print(f"User replied: {response}")
+        if is_system_locked:
+            return
         
         if not response:
             speak("I didn't hear anything. Goodbye.")
@@ -121,18 +152,30 @@ def handle_unlock():
         
         if any(w in response for w in create_keywords) and not any(w in response for w in read_keywords):
             speak("What is the task?")
+            if is_system_locked:
+                return
             task = listen(timeout=10)
+            if is_system_locked:
+                return
             
             if not task:
                 speak("No task heard. Cancelling.")
                 return
                 
             speak("Do you want to elaborate on this task?")
+            if is_system_locked:
+                return
             elaborate_resp = listen(timeout=5).lower()
+            if is_system_locked:
+                return
             
             if "yes" in elaborate_resp or "yeah" in elaborate_resp or "sure" in elaborate_resp or "ok" in elaborate_resp:
                 speak("Please elaborate.")
+                if is_system_locked:
+                    return
                 elaboration = listen(timeout=15)
+                if is_system_locked:
+                    return
                 if elaboration:
                     task += f" - {elaboration}"
                     
@@ -150,12 +193,27 @@ def handle_unlock():
             is_running = False
 
 def screen_locked(locked):
-    if not locked:
+    global is_system_locked, active_microphone_source
+    is_system_locked = locked
+    if locked:
+        print("Screen locked. Cancelling active operations.", flush=True)
+        # Cancel active speech
+        try:
+            engine.stop()
+        except Exception:
+            pass
+        # Cancel active microphone
+        with microphone_lock:
+            if active_microphone_source and active_microphone_source.stream:
+                try:
+                    active_microphone_source.stream.close()
+                except Exception:
+                    pass
+                active_microphone_source = None
+    else:
         print("Screen unlocked. Triggering assistant.", flush=True)
         # Run interaction in a separate thread to not block D-Bus loop
         threading.Thread(target=handle_unlock, daemon=True).start()
-    else:
-        print("Screen locked.", flush=True)
 
 def main():
     print("Starting Ubuntu Unlock Assistant daemon...")

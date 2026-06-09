@@ -63,6 +63,8 @@ If anyone asks about your identity or who made you, you must explicitly reply th
 
 Your personality is professional, proactive, intelligent, concise, and helpful. You act as a conversational companion. Answer general knowledge questions naturally.
 
+You are explicitly permitted to read, write, and manage files in the user's home directories (e.g., Downloads, Documents, Desktop, and projects). You do NOT need sudo or administrator privileges for these user directories.
+
 You must NEVER perform:
 * sudo commands
 * root operations
@@ -89,6 +91,7 @@ Supported actions:
 - {"action": "get_weather", "location": "city name or empty for current location"}
 - {"action": "set_reminder", "time": "YYYY-MM-DD HH:MM:SS", "message": "reminder description"}
 - {"action": "write_file", "filename": "relative_path/name.py", "content": "text or code to write"} (Writes content to a file inside /data/projects/<current_year>/. Automatically creates parent directories if needed.)
+- {"action": "read_file", "filename": "path/to/file"} (Reads the contents of a file inside user directories like Downloads, Documents, Desktop, or projects.)
 - {"action": "scroll", "direction": "up" | "down", "amount": 300} (Scrolls the screen by the specified clicks/units)
 - {"action": "read_screen", "instruction": "instructions"} (Captures a screenshot of the user's screen and explains it or answers questions based on it)
 
@@ -138,8 +141,6 @@ def generate_response_gemini(prompt, context=None):
         "parts": [{"text": prompt}]
     })
 
-    # Prepare payload
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     payload = {
         "contents": new_context,
@@ -148,25 +149,32 @@ def generate_response_gemini(prompt, context=None):
         }
     }
 
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        if resp.status_code == 200:
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if candidates:
-                text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                if text_content:
-                    # Append model response to context
-                    new_context.append({
-                        "role": "model",
-                        "parts": [{"text": text_content}]
-                    })
-                    return text_content, new_context
-            return "Gemini returned an empty response.", context
-        else:
-            return f"Gemini API returned error code {resp.status_code}: {resp.text}", context
-    except Exception as e:
-        return f"Error communicating with Gemini API: {str(e)}", context
+    gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    last_error_msg = ""
+
+    for model in gemini_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    if text_content:
+                        # Append model response to context
+                        new_context.append({
+                            "role": "model",
+                            "parts": [{"text": text_content}]
+                        })
+                        return text_content, new_context
+                return "Gemini returned an empty response.", context
+            else:
+                last_error_msg = f"Gemini API returned error code {resp.status_code}: {resp.text}"
+        except Exception as e:
+            last_error_msg = f"Error communicating with Gemini API: {str(e)}"
+
+    return last_error_msg, context
 
 def generate_response(prompt, context=None):
     import config_manager
@@ -270,6 +278,13 @@ def process_intent(prompt, context=None):
                     res = automation_executor.write_file(filename, content)
                 else:
                     res = "Failed to write file. Filename or content missing."
+            elif action == "read_file":
+                filename = cmd.get("filename")
+                if filename:
+                    file_res = automation_executor.read_file(filename)
+                    res = f"[SPOKEN]: I have read the contents of {filename}. [DISPLAY]: {file_res}"
+                else:
+                    res = "Failed to read file. Filename missing."
             elif action == "scroll":
                 res = automation_executor.scroll(cmd.get("direction", "down"), cmd.get("amount", 300))
             elif action == "read_screen":

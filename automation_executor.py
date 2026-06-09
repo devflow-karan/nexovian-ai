@@ -62,31 +62,48 @@ def resolve_project_path(path_str):
         return os.path.normpath(docs_fallback)
 
 def open_application(app_name, path=None):
-    # Try to use xdg-open or gtk-launch
-    # Simplest approach for ubuntu is to run the app name if it's in path, or gtk-launch
+    import shlex
+    import urllib.parse
+    
     app_name_lower = app_name.lower().replace(" ", "")
     
     # Common mappings
     mappings = {
         "vscode": "code",
-        "browser": "xdg-open http://google.com",
+        "browser": "xdg-open",
         "terminal": "gnome-terminal",
         "files": "nautilus"
     }
     
     cmd = mappings.get(app_name_lower, app_name_lower)
     
-    if path:
-        resolved_path = resolve_project_path(path)
-        if cmd == "code":
-            cmd = f"code {resolved_path}"
-        elif cmd == "gnome-terminal":
-            cmd = f"gnome-terminal --working-directory={resolved_path}"
-        elif cmd == "nautilus":
-            cmd = f"nautilus {resolved_path}"
+    if app_name_lower == "browser":
+        # Handle browser URL/search routing
+        if path:
+            # Check if it starts like a URL
+            if path.startswith("http://") or path.startswith("https://") or path.startswith("www."):
+                url = path
+                if url.startswith("www."):
+                    url = "http://" + url
+            else:
+                # Format as Google search query
+                url = f"https://google.com/search?q={urllib.parse.quote(path)}"
+            
+            cmd = f"xdg-open {shlex.quote(url)}"
         else:
-            # For other apps, pass path as argument
-            cmd = f"{cmd} {resolved_path}"
+            cmd = "xdg-open http://google.com"
+    else:
+        if path:
+            resolved_path = resolve_project_path(path)
+            quoted_path = shlex.quote(resolved_path)
+            if cmd == "code":
+                cmd = f"code {quoted_path}"
+            elif cmd == "gnome-terminal":
+                cmd = f"gnome-terminal --working-directory={quoted_path}"
+            elif cmd == "nautilus":
+                cmd = f"nautilus {quoted_path}"
+            else:
+                cmd = f"{cmd} {quoted_path}"
     
     try:
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -218,7 +235,6 @@ def read_screen(instruction="Explain what is on the screen"):
             pass
             
     # Send to Gemini API
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     
     prompt_text = (
@@ -245,43 +261,76 @@ def read_screen(instruction="Explain what is on the screen"):
         ]
     }
     
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        if resp.status_code != 200:
-            return f"Gemini API returned error code {resp.status_code}: {resp.text}"
-            
-        data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return "Gemini API returned no analysis candidates."
-            
-        text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        if not text_content:
-            return "Gemini API returned empty explanation."
-            
-        # Parse Summary and Details
-        summary = ""
-        details = ""
-        
-        if "Summary:" in text_content and "Details:" in text_content:
-            try:
-                summary = text_content.split("Summary:")[1].split("Details:")[0].strip()
-                details = text_content.split("Details:")[1].strip()
-            except Exception:
-                pass
+    gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    last_error_msg = ""
+    
+    for model in gemini_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    return "Gemini API returned no analysis candidates."
+                    
+                text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                if not text_content:
+                    return "Gemini API returned empty explanation."
+                    
+                # Parse Summary and Details
+                summary = ""
+                details = ""
                 
-        if not summary or not details:
-            # Fallback if structure wasn't strictly followed
-            summary = text_content[:150] + "..." if len(text_content) > 150 else text_content
-            details = text_content
+                if "Summary:" in text_content and "Details:" in text_content:
+                    try:
+                        summary = text_content.split("Summary:")[1].split("Details:")[0].strip()
+                        details = text_content.split("Details:")[1].strip()
+                    except Exception:
+                        pass
+                        
+                if not summary or not details:
+                    # Fallback if structure wasn't strictly followed
+                    summary = text_content[:150] + "..." if len(text_content) > 150 else text_content
+                    details = text_content
+                    
+                # Clean summary of formatting symbols
+                summary = summary.replace("*", "").replace("#", "").strip()
+                
+                return f"[SPOKEN]: {summary} [DISPLAY]: {details}"
+            else:
+                last_error_msg = f"Gemini API returned error code {resp.status_code}: {resp.text}"
+        except requests.exceptions.Timeout:
+            last_error_msg = "Gemini API request timed out."
+        except Exception as e:
+            last_error_msg = f"Error communicating with Gemini API: {str(e)}"
             
-        # Clean summary of formatting symbols
-        summary = summary.replace("*", "").replace("#", "").strip()
+    return last_error_msg
+
+
+def read_file(filename):
+    """Read contents of a file inside home directories or projects."""
+    try:
+        resolved_path = resolve_project_path(filename)
+        if not resolved_path or not os.path.exists(resolved_path):
+            expanded = os.path.expanduser(filename)
+            if os.path.exists(expanded):
+                resolved_path = expanded
+            else:
+                return f"File not found: {filename}"
+                
+        resolved_path = os.path.normpath(resolved_path)
         
-        return f"[SPOKEN]: {summary} [DISPLAY]: {details}"
-        
-    except requests.exceptions.Timeout:
-        return "Gemini API request timed out."
+        # Enforce safety boundaries: Only allow reading files inside home directory or /data/projects
+        home_dir = os.path.expanduser("~")
+        if not resolved_path.startswith(home_dir) and not resolved_path.startswith("/data/projects"):
+            return "That action is above my permissions. Accessing system files is restricted."
+            
+        with open(resolved_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(4000)
+            if len(content) >= 4000:
+                content += "\n... [truncated]"
+            return content
     except Exception as e:
-        return f"Error communicating with Gemini API: {str(e)}"
+        return f"Failed to read file: {str(e)}"
 
