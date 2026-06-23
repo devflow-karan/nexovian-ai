@@ -26,6 +26,61 @@ active_microphone_source = None
 microphone_lock = threading.Lock()
 is_speaking = False
 
+last_mute_check_time = 0.0
+cached_mute_status = False
+
+def is_microphone_muted():
+    global last_mute_check_time, cached_mute_status
+    now = time.time()
+    if now - last_mute_check_time < 2.0:
+        return cached_mute_status
+
+    import subprocess
+    last_mute_check_time = now
+    
+    # Method 1: Check using pactl
+    try:
+        result = subprocess.run(
+            ["pactl", "get-source-mute", "@DEFAULT_SOURCE@"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False
+        )
+        if result.returncode == 0:
+            output = result.stdout.strip().lower()
+            if "mute: yes" in output:
+                cached_mute_status = True
+                return True
+            elif "mute: no" in output:
+                cached_mute_status = False
+                return False
+    except Exception:
+        pass
+
+    # Method 2: Check using amixer sget Capture as fallback
+    try:
+        result = subprocess.run(
+            ["amixer", "sget", "Capture"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False
+        )
+        if result.returncode == 0:
+            output = result.stdout.strip().lower()
+            if "[off]" in output and "[on]" not in output:
+                cached_mute_status = True
+                return True
+            else:
+                cached_mute_status = False
+                return False
+    except Exception:
+        pass
+
+    cached_mute_status = False
+    return False
+
 def _get_user_name():
     try:
         import config_manager
@@ -103,6 +158,9 @@ def listen_for_command(timeout=10, phrase_time_limit=15):
     global active_microphone_source
     if is_system_locked:
         return None
+    if is_microphone_muted():
+        print("[audio_engine] Microphone is muted. Cannot listen for command.", flush=True)
+        return None
     r = sr.Recognizer()
     r.energy_threshold = 1000 # Static threshold to avoid recalibration delay
     r.dynamic_energy_threshold = True
@@ -165,6 +223,8 @@ def listen_for_wakeword(callback, wake_words=["nexovian"]):
             
             print(f"Listening for wake words: {', '.join(wake_words)}...")
             
+            has_logged_muted = False
+            
             while True:
                 import text_input_ui
                 bar_visible = False
@@ -174,12 +234,21 @@ def listen_for_wakeword(callback, wake_words=["nexovian"]):
                     except Exception:
                         pass
 
-                if ui_overlay.get_ui().active or is_system_locked or is_speaking or bar_visible:
+                muted = is_microphone_muted()
+                if ui_overlay.get_ui().active or is_system_locked or is_speaking or bar_visible or muted:
+                    if muted:
+                        if not has_logged_muted:
+                            print("[audio_engine] Microphone is muted. Pausing wake word listener.", flush=True)
+                            has_logged_muted = True
+                    else:
+                        has_logged_muted = False
+                        
                     if stream.is_active():
                         stream.stop_stream()
                     time.sleep(0.5)
                     continue
                 else:
+                    has_logged_muted = False
                     if not stream.is_active():
                         stream.start_stream()
                         
@@ -200,7 +269,7 @@ def listen_for_wakeword(callback, wake_words=["nexovian"]):
                         print(f"Vosk heard (standby): '{text}'")
                         import datetime
                         today_day = datetime.datetime.now().strftime("%A").lower()
-                        dynamic_wake_words = wake_words + [today_day, f"hey {today_day}"]
+                        dynamic_wake_words = wake_words + [f"hey {today_day}"]
                         for w in dynamic_wake_words:
                             if w in text:
                                 print(f"Wake word '{w}' detected!")

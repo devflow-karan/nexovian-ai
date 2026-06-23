@@ -94,6 +94,7 @@ Supported actions:
 - {"action": "read_file", "filename": "path/to/file"} (Reads the contents of a file inside user directories like Downloads, Documents, Desktop, or projects.)
 - {"action": "scroll", "direction": "up" | "down", "amount": 300} (Scrolls the screen by the specified clicks/units)
 - {"action": "read_screen", "instruction": "instructions"} (Captures a screenshot of the user's screen and explains it or answers questions based on it)
+- {"action": "set_autostart", "enabled": true | false} (Enable or disable automatic startup/launch of Nexovian at system boot/login)
 
 Only output commands if an action is requested. Otherwise just output text answering the user's questions naturally.
 
@@ -289,6 +290,9 @@ def process_intent(prompt, context=None):
                 res = automation_executor.scroll(cmd.get("direction", "down"), cmd.get("amount", 300))
             elif action == "read_screen":
                 res = automation_executor.read_screen(cmd.get("instruction", "Explain what is on the screen"))
+            elif action == "set_autostart":
+                enabled = cmd.get("enabled", True)
+                res = automation_executor.set_autostart_enabled(enabled)
                 
             if res:
                 action_results.append(res)

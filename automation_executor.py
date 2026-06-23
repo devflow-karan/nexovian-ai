@@ -28,6 +28,10 @@ def resolve_project_path(path_str):
     if not path_str:
         return None
         
+    # If path starts with tilde (~), expand it directly
+    if path_str.startswith("~"):
+        return os.path.normpath(os.path.expanduser(path_str))
+        
     from datetime import datetime
     current_year = str(datetime.now().year)
     base_dir = f"/data/projects/{current_year}"
@@ -36,7 +40,7 @@ def resolve_project_path(path_str):
     if os.path.isabs(path_str):
         return os.path.normpath(path_str)
         
-    # Check if directory exists in the current year's projects folder
+    # Check if directory or file exists in the current year's projects folder
     path_in_year = os.path.join(base_dir, path_str)
     if os.path.exists(path_in_year):
         return os.path.normpath(path_in_year)
@@ -46,19 +50,23 @@ def resolve_project_path(path_str):
     if os.path.exists(path_in_projects):
         return os.path.normpath(path_in_projects)
         
-    # Check in home directory
+    # Check in home directory (e.g. "Downloads/KaranKumar.pdf" -> "~/Downloads/KaranKumar.pdf")
     path_in_home = os.path.expanduser(f"~/{path_str}")
     if os.path.exists(path_in_home):
         return os.path.normpath(path_in_home)
         
-    # Otherwise, default to current year's projects folder and create it
+    # Otherwise, default to current year's projects folder and create parent directory
     try:
-        os.makedirs(path_in_year, exist_ok=True)
+        dir_to_make = os.path.dirname(path_in_year)
+        if dir_to_make:
+            os.makedirs(dir_to_make, exist_ok=True)
         return os.path.normpath(path_in_year)
     except Exception:
         # Fallback to home documents if permission error in /data/projects
         docs_fallback = os.path.expanduser(f"~/Documents/{path_str}")
-        os.makedirs(docs_fallback, exist_ok=True)
+        dir_fallback = os.path.dirname(docs_fallback)
+        if dir_fallback:
+            os.makedirs(dir_fallback, exist_ok=True)
         return os.path.normpath(docs_fallback)
 
 def open_application(app_name, path=None):
@@ -326,6 +334,43 @@ def read_file(filename):
         if not resolved_path.startswith(home_dir) and not resolved_path.startswith("/data/projects"):
             return "That action is above my permissions. Accessing system files is restricted."
             
+        # PDF parsing support
+        if resolved_path.lower().endswith(".pdf"):
+            import subprocess
+            try:
+                result = subprocess.run(["pdftotext", resolved_path, "-"], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    content = result.stdout[:4000]
+                    if len(result.stdout) >= 4000:
+                        content += "\n... [truncated]"
+                    return content
+                else:
+                    return f"Failed to extract PDF text: {result.stderr.strip()}"
+            except Exception as pdf_err:
+                return f"Failed to run pdftotext: {str(pdf_err)}"
+                
+        # DOCX parsing support
+        elif resolved_path.lower().endswith(".docx"):
+            import zipfile
+            import xml.etree.ElementTree as ET
+            try:
+                with zipfile.ZipFile(resolved_path) as docx:
+                    xml_content = docx.read('word/document.xml')
+                    root = ET.fromstring(xml_content)
+                    namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+                    text_parts = []
+                    for paragraph in root.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
+                        p_text = "".join(node.text for node in paragraph.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t') if node.text)
+                        if p_text:
+                            text_parts.append(p_text)
+                    full_text = "\n".join(text_parts)
+                    content = full_text[:4000]
+                    if len(full_text) >= 4000:
+                        content += "\n... [truncated]"
+                    return content
+            except Exception as docx_err:
+                return f"Failed to extract DOCX text: {str(docx_err)}"
+            
         with open(resolved_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read(4000)
             if len(content) >= 4000:
@@ -333,4 +378,65 @@ def read_file(filename):
             return content
     except Exception as e:
         return f"Failed to read file: {str(e)}"
+
+def set_autostart_enabled(enabled: bool):
+    """Enable or disable the autostart desktop entry for Nexovian."""
+    autostart_dir = os.path.expanduser("~/.config/autostart")
+    dest_path = os.path.join(autostart_dir, "nexovian.desktop")
+    
+    if not enabled:
+        if os.path.exists(dest_path):
+            try:
+                os.remove(dest_path)
+                return "Autostart disabled successfully. Nexovian will no longer launch automatically on login."
+            except Exception as e:
+                return f"Failed to disable autostart: {str(e)}"
+        return "Autostart is already disabled."
+    else:
+        try:
+            os.makedirs(autostart_dir, exist_ok=True)
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            src_path = os.path.join(script_dir, "nexovian.desktop")
+            
+            if os.path.exists(src_path):
+                import shutil
+                shutil.copy2(src_path, dest_path)
+            else:
+                default_content = (
+                    "[Desktop Entry]\n"
+                    "Type=Application\n"
+                    f"Exec=/usr/bin/python3 {os.path.join(script_dir, 'nexovian.py')}\n"
+                    "Icon=audio-input-microphone\n"
+                    "Hidden=false\n"
+                    "NoDisplay=false\n"
+                    "X-GNOME-Autostart-enabled=true\n"
+                    "Name=Nexovian AI Agent\n"
+                    "Comment=Desktop automation AI that listens for unlock and wake words\n"
+                    "Terminal=false\n"
+                    "Categories=Utility;Accessibility;\n"
+                )
+                with open(dest_path, "w") as f:
+                    f.write(default_content)
+            
+            # Ensure it is enabled in the file
+            if os.path.exists(dest_path):
+                with open(dest_path, "r") as f:
+                    lines = f.readlines()
+                new_lines = []
+                has_enabled_key = False
+                for line in lines:
+                    if line.strip().startswith("X-GNOME-Autostart-enabled"):
+                        new_lines.append("X-GNOME-Autostart-enabled=true\n")
+                        has_enabled_key = True
+                    else:
+                        new_lines.append(line)
+                if not has_enabled_key:
+                    new_lines.append("X-GNOME-Autostart-enabled=true\n")
+                with open(dest_path, "w") as f:
+                    f.writelines(new_lines)
+                    
+            return "Autostart enabled successfully. Nexovian will automatically launch when you start your system."
+        except Exception as e:
+            return f"Failed to enable autostart: {str(e)}"
+
 

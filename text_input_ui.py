@@ -251,6 +251,9 @@ class NexovianBar(Gtk.Window):
         # Keyboard: Escape hides the bar
         self.connect("key-press-event", self._on_window_key)
 
+        # Check microphone mute status periodically
+        GLib.timeout_add(2000, self._check_mic_status)
+
         self.show_all()
         self.hide()
 
@@ -297,6 +300,17 @@ class NexovianBar(Gtk.Window):
         adj = self._scroll.get_vadjustment()
         adj.set_value(adj.get_upper() - adj.get_page_size())
         return False
+
+    def _check_mic_status(self):
+        try:
+            audio = _get_audio()
+            if audio.is_microphone_muted():
+                self._entry.set_placeholder_text("🎤 [Mic Muted] Type a command for Nexovian…")
+            else:
+                self._entry.set_placeholder_text("Type a command for Nexovian…")
+        except Exception:
+            pass
+        return True
 
     def _set_busy(self, busy: bool):
         """Show/hide the thinking indicator."""

@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Exec=/usr/bin/python3 /data/projects/2026/todo-app/ubuntu-unlock-assistant/unlock_assistant.py
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-Name=Unlock Voice Assistant
-Comment=Listen for unlock and interact via voice for to-do items

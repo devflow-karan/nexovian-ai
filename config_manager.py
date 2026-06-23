@@ -28,8 +28,7 @@ def set_user_name(name):
 
 def get_wake_words():
     config = load_config()
-    # Provide an exhaustive list of known phonetic misinterpretations from the Vosk lightweight model
-    default_words = ["nexovian", "nexo", "hey", "hello"]
+    default_words = ["nexovian", "nexo"]
     return config.get("wake_words", default_words)
 
 def set_wake_words(words_list):
