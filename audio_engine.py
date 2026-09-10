@@ -38,7 +38,27 @@ def is_microphone_muted():
     import subprocess
     last_mute_check_time = now
     
-    # Method 1: Check using pactl
+    # Method 0: Check using wpctl (Ubuntu 24.04 / 26.04 PipeWire default)
+    try:
+        result = subprocess.run(
+            ["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False
+        )
+        if result.returncode == 0:
+            output = result.stdout.strip().lower()
+            if "[muted]" in output:
+                cached_mute_status = True
+                return True
+            else:
+                cached_mute_status = False
+                return False
+    except Exception:
+        pass
+
+    # Method 1: Check using pactl (PulseAudio fallback)
     try:
         result = subprocess.run(
             ["pactl", "get-source-mute", "@DEFAULT_SOURCE@"],
@@ -80,6 +100,18 @@ def is_microphone_muted():
 
     cached_mute_status = False
     return False
+
+def stop_speech():
+    """Stop active speech without affecting system lock or microphone states."""
+    if USE_ROBOTIC_VOICE:
+        try:
+            robotic_voice.cancel_active_speech()
+        except Exception:
+            pass
+    try:
+        engine.stop()
+    except Exception:
+        pass
 
 def _get_user_name():
     try:
@@ -186,6 +218,9 @@ def listen_for_command(timeout=10, phrase_time_limit=15):
                     return None
                 except sr.UnknownValueError:
                     return ""
+                except sr.RequestError as req_err:
+                    print(f"[audio_engine] Speech recognition service error: {req_err}", flush=True)
+                    return ""
             finally:
                 with microphone_lock:
                     active_microphone_source = None
@@ -193,38 +228,51 @@ def listen_for_command(timeout=10, phrase_time_limit=15):
         print(f"Microphone error: {e}")
         return None
 
-def listen_for_wakeword(callback, wake_words=["nexovian"]):
-    """Background thread to listen for wake words using Vosk."""
+def listen_for_wakeword(callback, wake_words=None):
+    """Background thread to listen for wake words using openWakeWord."""
+    if wake_words is None:
+        wake_words = ["nexovian"]
+
     try:
-        import vosk
+        from openwakeword.model import Model
         import pyaudio
+        import numpy as np
     except ImportError as err:
-        print(f"Missing dependency: {err}")
+        print(f"[audio_engine] Missing openWakeWord/PyAudio dependency: {err}", flush=True)
         return
 
-    model_path = os.path.expanduser("~/.local/share/vosk-models/vosk-model-small-en-us-0.15")
-    if not os.path.exists(model_path):
-        print(f"Vosk model not found at {model_path}. Run install_dependencies.sh")
-        return
+    import config_manager
+    model_path = config_manager.get_wakeword_model_path()
+    threshold = config_manager.get_wakeword_threshold()
 
-    vosk.SetLogLevel(-1)
     try:
-        model = vosk.Model(model_path)
+        if model_path and os.path.exists(model_path):
+            oww_model = Model(wakeword_model_paths=[model_path])
+            model_key = os.path.basename(model_path)[:-5]
+            print(f"[audio_engine] Loaded custom wake-word model '{model_key}' from {model_path} (threshold={threshold})", flush=True)
+        else:
+            print("[audio_engine] Notice: Custom nexovian.onnx not found. Falling back to default openWakeWord models.", flush=True)
+            oww_model = Model()
+            model_key = None
     except Exception as model_err:
-        print(f"Error loading Vosk model: {model_err}")
+        print(f"[audio_engine] Error loading wake word model: {model_err}", flush=True)
         return
+
+    CHUNK = 1280
+    RATE = 16000
+    p = pyaudio.PyAudio()
+
+    last_trigger_time = 0.0
 
     while True:
+        stream = None
         try:
-            rec = vosk.KaldiRecognizer(model, 16000)
-            p = pyaudio.PyAudio()
-            stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=4000)
+            stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
             stream.start_stream()
-            
-            print(f"Listening for wake words: {', '.join(wake_words)}...")
-            
+            print(f"[audio_engine] Listening for wake words: {', '.join(wake_words)} (engine: openWakeWord)...", flush=True)
+
             has_logged_muted = False
-            
+
             while True:
                 import text_input_ui
                 bar_visible = False
@@ -242,7 +290,7 @@ def listen_for_wakeword(callback, wake_words=["nexovian"]):
                             has_logged_muted = True
                     else:
                         has_logged_muted = False
-                        
+
                     if stream.is_active():
                         stream.stop_stream()
                     time.sleep(0.5)
@@ -251,31 +299,56 @@ def listen_for_wakeword(callback, wake_words=["nexovian"]):
                     has_logged_muted = False
                     if not stream.is_active():
                         stream.start_stream()
-                        
+
                 try:
-                    data = stream.read(4000, exception_on_overflow=False)
+                    data = stream.read(CHUNK, exception_on_overflow=False)
                     if not data:
-                        time.sleep(0.05)
+                        time.sleep(0.02)
                         continue
                 except Exception as stream_err:
                     print(f"[audio_engine] Stream read error: {stream_err}. Retrying in 1s...", flush=True)
                     time.sleep(1.0)
                     continue
 
-                if rec.AcceptWaveform(data):
-                    res = json.loads(rec.Result())
-                    text = res.get('text', '')
-                    if text:
-                        print(f"Vosk heard (standby): '{text}'")
-                        import datetime
-                        today_day = datetime.datetime.now().strftime("%A").lower()
-                        dynamic_wake_words = wake_words + [f"hey {today_day}"]
-                        for w in dynamic_wake_words:
-                            if w in text:
-                                print(f"Wake word '{w}' detected!")
-                                callback()
-                                time.sleep(2) # Debounce
-                                break
+                audio_chunk = np.frombuffer(data, dtype=np.int16)
+                preds = oww_model.predict(audio_chunk)
+
+                now = time.time()
+                triggered = False
+                trigger_model = ""
+
+                if model_key and model_key in preds:
+                    if preds[model_key] >= threshold:
+                        triggered = True
+                        trigger_model = model_key
+                else:
+                    for m, score in preds.items():
+                        if score >= threshold:
+                            triggered = True
+                            trigger_model = m
+                            break
+
+                if triggered and (now - last_trigger_time > 2.5):
+                    last_trigger_time = now
+                    score = preds.get(trigger_model, 0.0)
+                    print(f"[audio_engine] Wake word detected ({trigger_model}, score={score:.3f})!", flush=True)
+                    if stream.is_active():
+                        try:
+                            stream.stop_stream()
+                        except Exception:
+                            pass
+                    callback()
+                    time.sleep(1.0)
+
         except Exception as e:
-            print(f"Wake word engine error: {e}. Retrying in 5 seconds...")
+            print(f"[audio_engine] Wake word engine loop error: {e}. Retrying in 5 seconds...", flush=True)
             time.sleep(5)
+        finally:
+            if stream:
+                try:
+                    if stream.is_active():
+                        stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
+
