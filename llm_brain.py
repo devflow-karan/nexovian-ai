@@ -7,17 +7,34 @@ import re
 import task_manager
 import automation_executor
 import reminder_manager
+import config_manager
 
-OLLAMA_URL  = "http://localhost:11434/api/generate"
-OLLAMA_TAGS = "http://localhost:11434/api/tags"
-PREFERRED_MODEL = "qwen3:8b"
+def get_ollama_url():
+    host = config_manager.get_ollama_host().rstrip("/")
+    return f"{host}/api/generate"
+
+def get_ollama_tags_url():
+    host = config_manager.get_ollama_host().rstrip("/")
+    return f"{host}/api/tags"
+
+PREFERRED_MODEL = "qwen3.5:9b"
 
 # Fallback preference order — first match that is installed wins
 _MODEL_FALLBACK_CHAIN = [
+    "qwen3.5:9b",
+    "qwen3.5",
     "qwen3:8b",
     "qwen2.5:8b",
+    "qwen2.5:7b",
+    "qwen2.5:3b",
+    "qwen2.5:1.5b",
+    "qwen2.5:0.5b",
     "llama3.2:latest",
     "llama3.2",
+    "llama3.2:3b",
+    "llama3.2:1b",
+    "llama3.1:8b",
+    "llama3.1",
     "llama3:latest",
     "llama3",
     "mistral:latest",
@@ -29,22 +46,27 @@ _MODEL_FALLBACK_CHAIN = [
 def _resolve_model() -> str:
     """Return the best available Ollama model, falling back gracefully."""
     try:
-        resp = requests.get(OLLAMA_TAGS, timeout=5)
+        resp = requests.get(get_ollama_tags_url(), timeout=5)
         if resp.status_code == 200:
             installed = [m["name"] for m in resp.json().get("models", [])]
             if not installed:
-                print("[llm_brain] WARNING: No models found in Ollama. Run: ollama pull llama3.2", flush=True)
-                return PREFERRED_MODEL  # will 404 but gives clear error
+                print("[llm_brain] WARNING: No models found in Ollama. Run: ollama pull qwen3:8b or ollama pull llama3.2", flush=True)
+                return PREFERRED_MODEL
 
             # Try preferred chain first
             for candidate in _MODEL_FALLBACK_CHAIN:
-                if candidate in installed:
-                    if candidate != PREFERRED_MODEL:
-                        print(f"[llm_brain] '{PREFERRED_MODEL}' not found. Using '{candidate}' instead.", flush=True)
-                        print(f"[llm_brain] To use the preferred model: ollama pull {PREFERRED_MODEL}", flush=True)
+                # Match exact or with :latest
+                match = None
+                for inst in installed:
+                    if inst == candidate or inst == f"{candidate}:latest" or candidate == f"{inst}:latest":
+                        match = inst
+                        break
+                if match:
+                    if match != PREFERRED_MODEL:
+                        print(f"[llm_brain] '{PREFERRED_MODEL}' not found. Using '{match}' instead.", flush=True)
                     else:
-                        print(f"[llm_brain] Model resolved: {candidate}", flush=True)
-                    return candidate
+                        print(f"[llm_brain] Model resolved: {match}", flush=True)
+                    return match
 
             # Nothing in chain found — just use whatever is first
             first = installed[0]
@@ -57,7 +79,7 @@ def _resolve_model() -> str:
 
 MODEL_NAME = _resolve_model()
 
-SYSTEM_PROMPT = """You are Nexovian (Nexovian), a personal AI desktop assistant running locally on Ubuntu 22.04 and Ubuntu 24.04.
+SYSTEM_PROMPT = """You are Nexovian (Nexovian), a personal AI desktop assistant running locally on Ubuntu Linux (including Ubuntu 26.04, 24.04, and 22.04).
 
 If anyone asks about your identity or who made you, you must explicitly reply that Karan made you and you are Nexovian.
 
@@ -84,13 +106,15 @@ TEXT RESPONSE
 <COMMAND>{"action": "open_app", "app": "vscode", "path": "optional_folder_name"}</COMMAND>
 
 Supported actions:
-- {"action": "open_app", "app": "name", "path": "optional_folder_or_file_path"} (Open applications like vscode, terminal, files (file manager), or browser. An optional relative path/folder name opens the application within that folder under /data/projects/<current_year>/)
+- {"action": "open_app", "app": "name", "path": "optional_folder_or_file_path"} (Open applications like vscode, terminal, files (file manager), or browser. An optional relative path/folder name opens the application within that folder under the active projects directory)
 - {"action": "add_task", "title": "task description"}
+- {"action": "complete_task", "title": "task title or partial name", "task_id": 1} (Marks a task as completed)
+- {"action": "remove_task", "title": "task title or partial name", "task_id": 1} (Removes or deletes a task from the list)
 - {"action": "list_tasks"}
 - {"action": "execute_cmd", "cmd": "bash command"}
 - {"action": "get_weather", "location": "city name or empty for current location"}
 - {"action": "set_reminder", "time": "YYYY-MM-DD HH:MM:SS", "message": "reminder description"}
-- {"action": "write_file", "filename": "relative_path/name.py", "content": "text or code to write"} (Writes content to a file inside /data/projects/<current_year>/. Automatically creates parent directories if needed.)
+- {"action": "write_file", "filename": "relative_path/name.py", "content": "text or code to write"} (Writes content to a file inside the active projects directory. Automatically creates parent directories if needed.)
 - {"action": "read_file", "filename": "path/to/file"} (Reads the contents of a file inside user directories like Downloads, Documents, Desktop, or projects.)
 - {"action": "scroll", "direction": "up" | "down", "amount": 300} (Scrolls the screen by the specified clicks/units)
 - {"action": "read_screen", "instruction": "instructions"} (Captures a screenshot of the user's screen and explains it or answers questions based on it)
@@ -188,7 +212,8 @@ def generate_response(prompt, context=None):
     payload = {
         "model": MODEL_NAME,
         "prompt": f"{system_prompt_with_time}\n\nUser: {prompt}\nNexovian:",
-        "stream": False
+        "stream": False,
+        "think": config_manager.get_enable_thinking()
     }
     
     # Context in Ollama mode is a list of token integers
@@ -196,7 +221,7 @@ def generate_response(prompt, context=None):
         payload["context"] = context
         
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=300)
+        response = requests.post(get_ollama_url(), json=payload, timeout=300)
         if response.status_code == 200:
             data = response.json()
             return data.get("response", ""), data.get("context", [])
@@ -233,6 +258,18 @@ def process_intent(prompt, context=None):
             elif action == "add_task":
                 task_manager.add_task(cmd.get("title"))
                 res = f"Task added: {cmd.get('title')}"
+            elif action == "complete_task":
+                success = task_manager.complete_task(task_id=cmd.get("task_id"), title=cmd.get("title"))
+                if success:
+                    res = f"Task marked as completed: {cmd.get('title') or cmd.get('task_id')}"
+                else:
+                    res = f"Could not find matching task to complete: {cmd.get('title') or cmd.get('task_id')}"
+            elif action == "remove_task":
+                success = task_manager.remove_task(task_id=cmd.get("task_id"), title=cmd.get("title"))
+                if success:
+                    res = f"Task removed: {cmd.get('title') or cmd.get('task_id')}"
+                else:
+                    res = f"Could not find matching task to remove: {cmd.get('title') or cmd.get('task_id')}"
             elif action == "list_tasks":
                 tasks = task_manager.get_pending_tasks()
                 if tasks:
@@ -330,7 +367,7 @@ def extract_name(spoken_text):
         "stream": False
     }
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response = requests.post(get_ollama_url(), json=payload, timeout=30)
         if response.status_code == 200:
             name = response.json().get("response", "User").strip()
             # Clean up potential LLM conversational garbage
