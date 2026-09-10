@@ -63,9 +63,8 @@ class NexovianUI(Gtk.Window):
         display  = Gdk.Display.get_default()
         monitor  = display.get_primary_monitor() or display.get_monitor(0)
         geom     = monitor.get_geometry()
-        scale    = monitor.get_scale_factor()
-        screen_w = geom.width  * scale
-        screen_h = geom.height * scale
+        screen_w = geom.width
+        screen_h = geom.height
 
         # Place horizontally centred vertically (upper-middle of screen)
         overlay_y = geom.y + int(screen_h * 0.38)

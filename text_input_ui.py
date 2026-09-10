@@ -193,12 +193,11 @@ class NexovianBar(Gtk.Window):
         if monitor is None:
             monitor = display.get_monitor(0)
         geom = monitor.get_geometry()
-        scale = monitor.get_scale_factor()
-        screen_w = geom.width * scale
-        screen_h = geom.height * scale
+        screen_w = geom.width
+        screen_h = geom.height
 
         self.set_default_size(screen_w, BAR_HEIGHT)
-        self.move(geom.x, geom.y + geom.height * scale - BAR_HEIGHT)
+        self.move(geom.x, geom.y + screen_h - BAR_HEIGHT)
 
         # ── Layout ────────────────────────────────────────────────────────
         outer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -321,14 +320,20 @@ class NexovianBar(Gtk.Window):
     # ── Event handlers ────────────────────────────────────────────────────
 
     def _on_key_press(self, widget, event):
-        """Handle Escape in the text entry."""
+        """Handle Escape and Ctrl+Space in the text entry."""
         if event.keyval == Gdk.KEY_Escape:
+            self.hide_bar()
+            return True
+        if (event.state & Gdk.ModifierType.CONTROL_MASK) and event.keyval == Gdk.KEY_space:
             self.hide_bar()
             return True
         return False
 
     def _on_window_key(self, widget, event):
         if event.keyval == Gdk.KEY_Escape:
+            self.hide_bar()
+            return True
+        if (event.state & Gdk.ModifierType.CONTROL_MASK) and event.keyval == Gdk.KEY_space:
             self.hide_bar()
             return True
         return False
@@ -408,8 +413,7 @@ class NexovianBar(Gtk.Window):
             pass
         try:
             audio = _get_audio()
-            audio.set_system_locked(True)
-            audio.set_system_locked(False)
+            audio.stop_speech()
         except Exception:
             pass
 
@@ -421,8 +425,11 @@ class NexovianBar(Gtk.Window):
 
     def append_spoken_message(self, role: str, text: str):
         """Called externally to surface voice commands/responses in the chat log."""
-        if self.get_visible():
-            GLib.idle_add(self._add_message, role, text)
+        def _safe_append():
+            if self.get_visible():
+                self._add_message(role, text)
+            return False
+        GLib.idle_add(_safe_append)
 
 
 # ─── Global instance ──────────────────────────────────────────────────────────

@@ -1,7 +1,24 @@
 import subprocess
-import pyautogui
 import os
+import sys
+import types
 import time
+import config_manager
+
+# Headless / missing tkinter fallback for pyautogui on minimal Ubuntu installations
+if "tkinter" not in sys.modules:
+    try:
+        import tkinter
+    except ImportError:
+        dummy_tk = types.ModuleType("tkinter")
+        dummy_tk.ttk = types.ModuleType("ttk")
+        dummy_tk.Event = object
+        dummy_tk.TkVersion = 8.6
+        dummy_tk.TclVersion = 8.6
+        sys.modules["tkinter"] = dummy_tk
+        sys.modules["tkinter.ttk"] = dummy_tk.ttk
+
+import pyautogui
 
 def is_safe_command(cmd_str):
     """Check if the command is safe to run. Prevent sudo/root operations."""
@@ -32,37 +49,31 @@ def resolve_project_path(path_str):
     if path_str.startswith("~"):
         return os.path.normpath(os.path.expanduser(path_str))
         
-    from datetime import datetime
-    current_year = str(datetime.now().year)
-    base_dir = f"/data/projects/{current_year}"
+    import config_manager
+    base_dir = config_manager.get_projects_dir()
     
     # If path_str is absolute, use it (ensuring it is resolved safely)
     if os.path.isabs(path_str):
         return os.path.normpath(path_str)
         
-    # Check if directory or file exists in the current year's projects folder
-    path_in_year = os.path.join(base_dir, path_str)
-    if os.path.exists(path_in_year):
-        return os.path.normpath(path_in_year)
-        
-    # Check in /data/projects generally
-    path_in_projects = os.path.join("/data/projects", path_str)
-    if os.path.exists(path_in_projects):
-        return os.path.normpath(path_in_projects)
+    # Check if directory or file exists in the active projects folder
+    path_in_base = os.path.join(base_dir, path_str)
+    if os.path.exists(path_in_base):
+        return os.path.normpath(path_in_base)
         
     # Check in home directory (e.g. "Downloads/KaranKumar.pdf" -> "~/Downloads/KaranKumar.pdf")
     path_in_home = os.path.expanduser(f"~/{path_str}")
     if os.path.exists(path_in_home):
         return os.path.normpath(path_in_home)
         
-    # Otherwise, default to current year's projects folder and create parent directory
+    # Otherwise, default to projects folder and create parent directory
     try:
-        dir_to_make = os.path.dirname(path_in_year)
+        dir_to_make = os.path.dirname(path_in_base)
         if dir_to_make:
             os.makedirs(dir_to_make, exist_ok=True)
-        return os.path.normpath(path_in_year)
+        return os.path.normpath(path_in_base)
     except Exception:
-        # Fallback to home documents if permission error in /data/projects
+        # Fallback to home documents
         docs_fallback = os.path.expanduser(f"~/Documents/{path_str}")
         dir_fallback = os.path.dirname(docs_fallback)
         if dir_fallback:
@@ -71,15 +82,25 @@ def resolve_project_path(path_str):
 
 def open_application(app_name, path=None):
     import shlex
+    import shutil
     import urllib.parse
     
     app_name_lower = app_name.lower().replace(" ", "")
     
+    # Detect installed terminal emulator (Ptyxis on Ubuntu 26, gnome-terminal, etc.)
+    terminal_bin = None
+    for candidate in ["ptyxis", "gnome-terminal", "x-terminal-emulator", "kgx"]:
+        if shutil.which(candidate):
+            terminal_bin = candidate
+            break
+    if not terminal_bin:
+        terminal_bin = "x-terminal-emulator"
+
     # Common mappings
     mappings = {
         "vscode": "code",
         "browser": "xdg-open",
-        "terminal": "gnome-terminal",
+        "terminal": terminal_bin,
         "files": "nautilus"
     }
     
@@ -106,6 +127,8 @@ def open_application(app_name, path=None):
             quoted_path = shlex.quote(resolved_path)
             if cmd == "code":
                 cmd = f"code {quoted_path}"
+            elif cmd == "ptyxis":
+                cmd = f"ptyxis --working-directory={quoted_path}"
             elif cmd == "gnome-terminal":
                 cmd = f"gnome-terminal --working-directory={quoted_path}"
             elif cmd == "nautilus":
@@ -130,11 +153,10 @@ def press_key(key):
     return f"Pressed key: {key}"
 
 def write_file(filename, content):
-    """Write text or code to a file inside the /data/projects/<current_year>/ folder."""
+    """Write text or code to a file inside the active projects folder."""
     try:
-        from datetime import datetime
-        current_year = str(datetime.now().year)
-        base_dir = f"/data/projects/{current_year}"
+        import config_manager
+        base_dir = config_manager.get_projects_dir()
         
         # Clean path to prevent escaping outside directories
         # Allow subdirectory files, e.g. "abc/main.py"
@@ -144,7 +166,7 @@ def write_file(filename, content):
             
         file_path = os.path.join(base_dir, safe_path)
         
-        # Fallback if base_dir is not writable or doesn't exist
+        # Write to active project directory
         try:
             dir_path = os.path.dirname(file_path)
             os.makedirs(dir_path, exist_ok=True)
@@ -180,6 +202,7 @@ def read_screen(instruction="Explain what is on the screen"):
     """Capture the screen and get Gemini API explanation."""
     import base64
     import requests
+    import shutil
     import config_manager
     import ui_overlay
     import text_input_ui
@@ -213,17 +236,38 @@ def read_screen(instruction="Explain what is on the screen"):
     # Give UI windows time to fade out / hide
     time.sleep(0.5)
     
-    try:
-        # Capture screenshot
-        screenshot = pyautogui.screenshot()
-        screenshot.save(temp_img_path)
-    except Exception as e:
-        # Restore UI before returning error
-        if bar_was_visible:
-            text_input_ui.show_bar()
-        if overlay_was_active:
-            ui_overlay.show_state("standby")
-        return f"Failed to capture screenshot: {str(e)}"
+    screenshot_captured = False
+    
+    # Attempt Wayland / GNOME native tools first
+    if shutil.which("gnome-screenshot"):
+        try:
+            res = subprocess.run(["gnome-screenshot", "-f", temp_img_path], capture_output=True, timeout=5)
+            if res.returncode == 0 and os.path.exists(temp_img_path) and os.path.getsize(temp_img_path) > 0:
+                screenshot_captured = True
+        except Exception:
+            pass
+
+    if not screenshot_captured and shutil.which("grim"):
+        try:
+            res = subprocess.run(["grim", temp_img_path], capture_output=True, timeout=5)
+            if res.returncode == 0 and os.path.exists(temp_img_path) and os.path.getsize(temp_img_path) > 0:
+                screenshot_captured = True
+        except Exception:
+            pass
+
+    # Fallback to pyautogui (X11 / Xwayland)
+    if not screenshot_captured:
+        try:
+            screenshot = pyautogui.screenshot()
+            screenshot.save(temp_img_path)
+            screenshot_captured = True
+        except Exception as e:
+            # Restore UI before returning error
+            if bar_was_visible:
+                text_input_ui.show_bar()
+            if overlay_was_active:
+                ui_overlay.show_state("standby")
+            return f"Failed to capture screenshot: {str(e)}"
         
     # Restore UI
     if bar_was_visible:
@@ -329,9 +373,10 @@ def read_file(filename):
                 
         resolved_path = os.path.normpath(resolved_path)
         
-        # Enforce safety boundaries: Only allow reading files inside home directory or /data/projects
+        # Enforce safety boundaries: Only allow reading files inside home directory or configured projects
         home_dir = os.path.expanduser("~")
-        if not resolved_path.startswith(home_dir) and not resolved_path.startswith("/data/projects"):
+        projects_dir = config_manager.get_projects_dir()
+        if not resolved_path.startswith(home_dir) and not resolved_path.startswith(projects_dir):
             return "That action is above my permissions. Accessing system files is restricted."
             
         # PDF parsing support
@@ -394,46 +439,27 @@ def set_autostart_enabled(enabled: bool):
         return "Autostart is already disabled."
     else:
         try:
+            import sys
             os.makedirs(autostart_dir, exist_ok=True)
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            src_path = os.path.join(script_dir, "nexovian.desktop")
+            nexovian_py = os.path.join(script_dir, "nexovian.py")
+            py_bin = sys.executable or "/usr/bin/python3"
             
-            if os.path.exists(src_path):
-                import shutil
-                shutil.copy2(src_path, dest_path)
-            else:
-                default_content = (
-                    "[Desktop Entry]\n"
-                    "Type=Application\n"
-                    f"Exec=/usr/bin/python3 {os.path.join(script_dir, 'nexovian.py')}\n"
-                    "Icon=audio-input-microphone\n"
-                    "Hidden=false\n"
-                    "NoDisplay=false\n"
-                    "X-GNOME-Autostart-enabled=true\n"
-                    "Name=Nexovian AI Agent\n"
-                    "Comment=Desktop automation AI that listens for unlock and wake words\n"
-                    "Terminal=false\n"
-                    "Categories=Utility;Accessibility;\n"
-                )
-                with open(dest_path, "w") as f:
-                    f.write(default_content)
-            
-            # Ensure it is enabled in the file
-            if os.path.exists(dest_path):
-                with open(dest_path, "r") as f:
-                    lines = f.readlines()
-                new_lines = []
-                has_enabled_key = False
-                for line in lines:
-                    if line.strip().startswith("X-GNOME-Autostart-enabled"):
-                        new_lines.append("X-GNOME-Autostart-enabled=true\n")
-                        has_enabled_key = True
-                    else:
-                        new_lines.append(line)
-                if not has_enabled_key:
-                    new_lines.append("X-GNOME-Autostart-enabled=true\n")
-                with open(dest_path, "w") as f:
-                    f.writelines(new_lines)
+            content = (
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                f"Exec={py_bin} {nexovian_py}\n"
+                "Icon=audio-input-microphone\n"
+                "Hidden=false\n"
+                "NoDisplay=false\n"
+                "X-GNOME-Autostart-enabled=true\n"
+                "Name=Nexovian AI Agent\n"
+                "Comment=Desktop automation AI that listens for unlock and wake words\n"
+                "Terminal=false\n"
+                "Categories=Utility;Accessibility;\n"
+            )
+            with open(dest_path, "w") as f:
+                f.write(content)
                     
             return "Autostart enabled successfully. Nexovian will automatically launch when you start your system."
         except Exception as e:

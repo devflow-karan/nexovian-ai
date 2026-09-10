@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 import os
 import sys
+
+# On Wayland (Ubuntu 24.04 / 26.04 default), GTK windows cannot be positioned or kept above
+# without XWayland. Enforce X11 backend if DISPLAY is available.
+if os.environ.get("DISPLAY") and "GDK_BACKEND" not in os.environ:
+    os.environ["GDK_BACKEND"] = "x11"
+
 import pwd
 import time
 import threading
@@ -31,6 +37,21 @@ class NexovianDBusService(dbus.service.Object):
     def WakeUp(self):
         log_message("D-Bus WakeUp method called. Triggering voice interaction.")
         threading.Thread(target=wake_word_detected, daemon=True).start()
+
+    @dbus.service.method('org.nexovian.Agent', in_signature='', out_signature='')
+    def ToggleBar(self):
+        log_message("D-Bus ToggleBar method called.")
+        text_input_ui.toggle_bar()
+
+    @dbus.service.method('org.nexovian.Agent', in_signature='', out_signature='')
+    def ShowBar(self):
+        log_message("D-Bus ShowBar method called.")
+        text_input_ui.show_bar()
+
+    @dbus.service.method('org.nexovian.Agent', in_signature='', out_signature='')
+    def HideBar(self):
+        log_message("D-Bus HideBar method called.")
+        text_input_ui.hide_bar()
 
 def log_message(msg):
     from datetime import datetime
@@ -216,7 +237,7 @@ def onboarding_flow():
         time.sleep(2) # Wait for UI to initialize
         audio_engine.speak("Hello! I am Nexovian. It looks like this is my first time running. What would you like me to call you?")
         while True:
-            name = audio_engine.listen_for_command(timeout=2)
+            name = audio_engine.listen_for_command(timeout=10)
             if name and len(name.strip()) > 1:
                 extracted_name = llm_brain.extract_name(name)
                 audio_engine.speak(f"Nice to meet you, {extracted_name}. I have saved your profile. I will now run in the background. Just say 'Nexovian' to wake me up.")
@@ -240,20 +261,123 @@ def onboarding_flow():
     wakeword_thread = threading.Thread(target=audio_engine.listen_for_wakeword, args=(wake_word_detected, wake_words), daemon=True)
     wakeword_thread.start()
 
-def _start_hotkey_listener():
-    """Listen for Ctrl+Space globally and toggle the text input bar."""
+def ensure_system_integration():
+    """Ensure D-Bus auto-activation, GNOME shortcuts, IBus unbinding, and desktop entries are configured."""
+    import shutil
+    import subprocess
+    import ast
+
+    script_path = os.path.abspath(__file__)
+    py_exec = sys.executable or "/usr/bin/python3"
+
+    # 1. Install D-Bus session service for on-demand auto-activation
     try:
+        dbus_services_dir = os.path.expanduser("~/.local/share/dbus-1/services")
+        os.makedirs(dbus_services_dir, exist_ok=True)
+        service_path = os.path.join(dbus_services_dir, "org.nexovian.Agent.service")
+        service_content = f"[D-BUS Service]\nName=org.nexovian.Agent\nExec={py_exec} {script_path}\n"
+        with open(service_path, "w") as f:
+            f.write(service_content)
+        log_message(f"D-Bus auto-activation service verified at {service_path}")
+    except Exception as e:
+        log_message(f"Note on D-Bus service setup: {e}")
+
+    # 2. Setup GNOME global shortcut and resolve IBus conflict
+    if shutil.which("gsettings"):
+        try:
+            # Remove Control+space from IBus trigger hotkey if present to prevent shortcut hijacking
+            res = subprocess.run(
+                ["gsettings", "get", "org.freedesktop.ibus.general.hotkey", "trigger"],
+                capture_output=True, text=True, check=False
+            )
+            if res.returncode == 0 and "Control+space" in res.stdout:
+                try:
+                    triggers = ast.literal_eval(res.stdout.strip())
+                    new_triggers = [t for t in triggers if t != "Control+space"]
+                    subprocess.run(
+                        ["gsettings", "set", "org.freedesktop.ibus.general.hotkey", "trigger", str(new_triggers)],
+                        capture_output=True, check=False
+                    )
+                    log_message("Removed Control+space from IBus triggers to prevent hotkey conflicts.")
+                except Exception as ex:
+                    log_message(f"Could not update IBus triggers: {ex}")
+
+            # Register native GNOME media-keys custom keybinding (crucial for Wayland)
+            key_path = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nexovian/"
+            res = subprocess.run(
+                ["gsettings", "get", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings"],
+                capture_output=True, text=True, check=False
+            )
+            if res.returncode == 0:
+                val = res.stdout.strip()
+                existing = []
+                if not val.startswith("@as"):
+                    try:
+                        existing = ast.literal_eval(val)
+                    except Exception:
+                        existing = []
+
+                if key_path not in existing:
+                    existing.append(key_path)
+                    subprocess.run(
+                        ["gsettings", "set", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings", str(existing)],
+                        capture_output=True, check=False
+                    )
+
+                schema_path = f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{key_path}"
+                subprocess.run(["gsettings", "set", schema_path, "name", "Nexovian Toggle"], capture_output=True, check=False)
+                subprocess.run(
+                    ["gsettings", "set", schema_path, "command", "gdbus call --session --dest org.nexovian.Agent --object-path /org/nexovian/Agent --method org.nexovian.Agent.ToggleBar"],
+                    capture_output=True, check=False
+                )
+                subprocess.run(["gsettings", "set", schema_path, "binding", "<Control>space"], capture_output=True, check=False)
+                log_message("Verified GNOME global shortcut <Control>space for Nexovian.")
+        except Exception as e:
+            log_message(f"Note on GNOME keybinding setup: {e}")
+
+    # 3. Ensure desktop autostart entry and applications launcher entry exist
+    try:
+        repo_desktop = os.path.join(os.path.dirname(script_path), "nexovian.desktop")
+        if os.path.exists(repo_desktop):
+            autostart_dir = os.path.expanduser("~/.config/autostart")
+            os.makedirs(autostart_dir, exist_ok=True)
+            desktop_file = os.path.join(autostart_dir, "nexovian.desktop")
+            if not os.path.exists(desktop_file):
+                shutil.copyfile(repo_desktop, desktop_file)
+                log_message(f"Installed autostart entry to {desktop_file}")
+
+            apps_dir = os.path.expanduser("~/.local/share/applications")
+            os.makedirs(apps_dir, exist_ok=True)
+            app_file = os.path.join(apps_dir, "nexovian.desktop")
+            if not os.path.exists(app_file):
+                shutil.copyfile(repo_desktop, app_file)
+    except Exception as e:
+        log_message(f"Note on desktop entry setup: {e}")
+
+
+def _start_hotkey_listener():
+    """Listen for Ctrl+Space globally via pynput (fallback for X11 environments)."""
+    try:
+        # Authorize Xwayland access for local user if on Wayland
+        if os.environ.get("WAYLAND_DISPLAY") and os.environ.get("DISPLAY"):
+            try:
+                import subprocess
+                subprocess.run(["xhost", "+si:localuser:" + (os.environ.get("USER") or "karan-kumar")],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            except Exception:
+                pass
+
         from pynput import keyboard
 
         def on_activate():
             text_input_ui.toggle_bar()
 
         with keyboard.GlobalHotKeys({'<ctrl>+<space>': on_activate}) as h:
-            print("[nexovian] Global hotkey Ctrl+Space registered.", flush=True)
+            print("[nexovian] Global hotkey Ctrl+Space registered via pynput.", flush=True)
             h.join()
     except Exception as e:
-        print(f"[nexovian] Could not register global hotkey (pynput): {e}", flush=True)
-        print("[nexovian] Install pynput: pip3 install pynput", flush=True)
+        print(f"[nexovian] Note on global hotkey (pynput): {e}", flush=True)
+
 
 
 def login1_session_locked():
@@ -271,8 +395,18 @@ def main():
         try:
             remote_object = session_bus.get_object('org.nexovian.Agent', '/org/nexovian/Agent')
             interface = dbus.Interface(remote_object, 'org.nexovian.Agent')
-            interface.WakeUp()
-            print("Nexovian daemon is already running. Sent WakeUp signal.")
+            if "--wake" in sys.argv:
+                interface.WakeUp()
+                print("Nexovian daemon is running. Sent WakeUp signal.")
+            elif "--show" in sys.argv:
+                interface.ShowBar()
+                print("Nexovian daemon is running. Sent ShowBar signal.")
+            elif "--hide" in sys.argv:
+                interface.HideBar()
+                print("Nexovian daemon is running. Sent HideBar signal.")
+            else:
+                interface.ToggleBar()
+                print("Nexovian daemon is running. Sent ToggleBar signal.")
             sys.exit(0)
         except Exception as e:
             print(f"Failed to communicate with running daemon: {e}")
@@ -294,6 +428,9 @@ def main():
     except Exception:
         pass
     
+    # Ensure GNOME shortcuts, IBus trigger fix, and auto-activation are installed
+    ensure_system_integration()
+
     def init_bar():
         text_input_ui.get_bar()
         return False

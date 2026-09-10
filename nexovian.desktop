@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Exec=/usr/bin/python3 /data/projects/2026/todo-app/ubuntu-unlock-assistant/nexovian.py
+Exec=/usr/bin/python3 /home/karan-kumar/data/nexovian-ai/nexovian.py
 Icon=audio-input-microphone
 Hidden=false
 NoDisplay=false

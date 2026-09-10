@@ -1,20 +1,24 @@
 import os
 import json
+import config_manager
 
-TASKS_FILE = os.path.expanduser("~/Documents/tasks.json")
+def get_tasks_file():
+    return config_manager.get_tasks_file()
 
 def load_tasks():
-    if not os.path.exists(TASKS_FILE):
+    tasks_path = get_tasks_file()
+    if not os.path.exists(tasks_path):
         return []
     try:
-        with open(TASKS_FILE, "r") as f:
+        with open(tasks_path, "r") as f:
             return json.load(f)
     except Exception:
         return []
 
 def save_tasks(tasks):
-    os.makedirs(os.path.dirname(TASKS_FILE), exist_ok=True)
-    with open(TASKS_FILE, "w") as f:
+    tasks_path = get_tasks_file()
+    os.makedirs(os.path.dirname(tasks_path), exist_ok=True)
+    with open(tasks_path, "w") as f:
         json.dump(tasks, f, indent=4)
 
 def add_task(title, priority="Normal"):
