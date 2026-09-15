@@ -202,41 +202,9 @@ def generate_response_gemini(prompt, context=None):
     return last_error_msg, context
 
 def generate_response(prompt, context=None):
-    import config_manager
-    if config_manager.use_gemini_brain():
-        return generate_response_gemini(prompt, context)
-
-    now_str = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
-    system_prompt_with_time = SYSTEM_PROMPT + f"\n\nCurrent System Time: {now_str}\nUse this exact current time to interpret phrases like 'today', 'tomorrow', 'in 5 minutes', or 'at 11am'."
-    
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": f"{system_prompt_with_time}\n\nUser: {prompt}\nNexovian:",
-        "stream": False,
-        "think": config_manager.get_enable_thinking()
-    }
-    
-    # Context in Ollama mode is a list of token integers
-    if context and isinstance(context, list) and all(isinstance(x, int) for x in context):
-        payload["context"] = context
-        
-    try:
-        response = requests.post(get_ollama_url(), json=payload, timeout=300)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("response", ""), data.get("context", [])
-        elif response.status_code == 404:
-            return (
-                f"Model '{MODEL_NAME}' is not available in Ollama. "
-                f"Run: ollama pull {MODEL_NAME}",
-                context
-            )
-        else:
-            return f"Error: Ollama returned status {response.status_code}", context
-    except requests.exceptions.ConnectionError:
-        return "Cannot reach Ollama. Make sure it is running: ollama serve", context
-    except Exception as e:
-        return f"Error communicating with AI: {str(e)}", context
+    from providers import get_llm_provider
+    provider = get_llm_provider(SYSTEM_PROMPT)
+    return provider.generate_response(prompt, context)
 
 def process_intent(prompt, context=None):
     text_response, new_context = generate_response(prompt, context)

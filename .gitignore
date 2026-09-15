@@ -18,3 +18,4 @@ ENV/
 # Logs and temp files
 *.log
 temp_screenshot.png
+COMMANDS.md

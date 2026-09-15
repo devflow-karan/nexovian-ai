@@ -15,6 +15,7 @@ import tempfile
 import math
 import numpy as np
 import threading
+import shutil
 
 active_proc = None
 proc_lock = threading.Lock()
@@ -174,8 +175,9 @@ def speak_robotic(text: str):
         with proc_lock:
             if is_cancelled:
                 return
+            player = ["paplay", robo_wav] if shutil.which("paplay") else ["aplay", "-q", robo_wav]
             active_proc = subprocess.Popen(
-                ["aplay", "-q", robo_wav],
+                player,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

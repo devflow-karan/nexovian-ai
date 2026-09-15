@@ -33,6 +33,7 @@ Before installing, ensure your system meets the following requirements:
    ```bash
    bash install_dependencies.sh
    ```
+   *For details on package purposes, disk savings, and re-enabling optional modules, see [PACKAGES.md](PACKAGES.md).*
 
 2. **Install Ollama**
    Nexovian relies on [Ollama](https://ollama.com/) to process AI commands. If the installation script failed to install Ollama due to `sudo` permissions, you can install it manually:

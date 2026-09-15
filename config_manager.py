@@ -45,10 +45,19 @@ def set_gemini_api_key(key):
     config["gemini_api_key"] = key
     save_config(config)
 
+def get_llm_provider():
+    config = load_config()
+    return config.get("llm_provider", "ollama")
+
+def set_llm_provider(provider):
+    config = load_config()
+    config["llm_provider"] = provider.lower()
+    save_config(config)
+
 def use_gemini_brain():
     config = load_config()
-    has_key = bool(config.get("gemini_api_key"))
-    return config.get("use_gemini_brain", has_key)
+    # Explicit opt-in only: must have both llm_provider == 'gemini' and an api key
+    return config.get("llm_provider") == "gemini" and bool(config.get("gemini_api_key"))
 
 def use_robotic_voice():
     config = load_config()
@@ -178,5 +187,53 @@ def get_wakeword_threshold():
 def set_wakeword_threshold(val):
     config = load_config()
     config["wakeword_threshold"] = float(val)
+    save_config(config)
+
+def get_vision_provider():
+    config = load_config()
+    return config.get("vision_provider", "ollama")
+
+def set_vision_provider(provider):
+    config = load_config()
+    config["vision_provider"] = provider.lower()
+    save_config(config)
+
+def get_vision_model():
+    config = load_config()
+    return config.get("vision_model", "moondream")
+
+def set_vision_model(model):
+    config = load_config()
+    config["vision_model"] = model
+    save_config(config)
+
+def get_stt_provider():
+    config = load_config()
+    return config.get("stt_provider", "vosk")
+
+def set_stt_provider(provider):
+    config = load_config()
+    config["stt_provider"] = provider.lower()
+    save_config(config)
+
+def get_tts_engine():
+    config = load_config()
+    return config.get("tts_engine", "cloned")
+
+def set_tts_engine(engine):
+    config = load_config()
+    config["tts_engine"] = engine.lower()
+    save_config(config)
+
+def get_voice_reference_path():
+    config = load_config()
+    configured = config.get("voice_reference_path")
+    if configured and os.path.exists(os.path.expanduser(configured)):
+        return os.path.expanduser(configured)
+    return os.path.expanduser("~/.config/nexovian/voice_reference.wav")
+
+def set_voice_reference_path(path):
+    config = load_config()
+    config["voice_reference_path"] = path
     save_config(config)
 

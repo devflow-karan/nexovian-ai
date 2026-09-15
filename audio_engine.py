@@ -103,6 +103,11 @@ def is_microphone_muted():
 
 def stop_speech():
     """Stop active speech without affecting system lock or microphone states."""
+    try:
+        from providers import get_tts_provider
+        get_tts_provider().cancel()
+    except Exception:
+        pass
     if USE_ROBOTIC_VOICE:
         try:
             robotic_voice.cancel_active_speech()
@@ -132,17 +137,7 @@ def set_system_locked(locked):
     is_system_locked = locked
     if locked:
         print("[audio_engine] System locked. Cancelling active operations.", flush=True)
-        # Cancel robotic voice
-        if USE_ROBOTIC_VOICE:
-            try:
-                robotic_voice.cancel_active_speech()
-            except Exception:
-                pass
-        # Cancel pyttsx3
-        try:
-            engine.stop()
-        except Exception:
-            pass
+        stop_speech()
         # Cancel active microphone
         with microphone_lock:
             if active_microphone_source and active_microphone_source.stream:
@@ -163,7 +158,6 @@ def speak(text):
     global is_speaking
     if is_system_locked:
         return
-    import config_manager
     with speak_lock:
         if is_system_locked:
             return
@@ -171,11 +165,16 @@ def speak(text):
         try:
             ui_overlay.show_state("speaking")
             print(f"Nexovian: {text}", flush=True)
-            if USE_ROBOTIC_VOICE and config_manager.use_robotic_voice():
-                robotic_voice.speak_robotic(text)
-            else:
-                engine.say(text)
-                engine.runAndWait()
+            from providers import get_tts_provider
+            tts_provider = get_tts_provider()
+            success = tts_provider.speak(text)
+            if not success:
+                # Ultimate safety fallback
+                try:
+                    engine.say(text)
+                    engine.runAndWait()
+                except Exception:
+                    pass
             time.sleep(0.5)
         finally:
             is_speaking = False
@@ -196,7 +195,7 @@ def listen_for_command(timeout=10, phrase_time_limit=15):
     r = sr.Recognizer()
     r.energy_threshold = 1000 # Static threshold to avoid recalibration delay
     r.dynamic_energy_threshold = True
-    r.pause_threshold = 2.5 # Wait for 2.5 seconds of silence before assuming the user is finished
+    r.pause_threshold = 1.2 # Wait 1.2 seconds of silence before processing
     try:
         with sr.Microphone() as source:
             with microphone_lock:
@@ -208,7 +207,15 @@ def listen_for_command(timeout=10, phrase_time_limit=15):
                 print("Listening for command...", flush=True)
                 try:
                     audio = r.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
-                    text = r.recognize_google(audio)
+                    from providers import get_stt_provider
+                    stt_provider = get_stt_provider()
+                    text = stt_provider.transcribe(r, audio)
+                    # Optional fallback to Google if Vosk returned empty and user explicitly enabled Google fallback
+                    if not text and stt_provider.name != "google" and config_manager.load_config().get("enable_google_stt_fallback", False):
+                        try:
+                            text = r.recognize_google(audio)
+                        except Exception:
+                            pass
                     print(f"{_get_user_name()}: {text}")
                     # Reject garbage / very short sounds
                     if len(text.strip()) < 2:

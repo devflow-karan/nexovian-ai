@@ -205,12 +205,6 @@ def read_screen(instruction="Explain what is on the screen"):
     import shutil
     import config_manager
     import ui_overlay
-    import text_input_ui
-    
-    api_key = config_manager.get_gemini_api_key()
-    if not api_key:
-        return "Failed to read screen: Gemini API key not configured."
-        
     temp_img_path = os.path.expanduser("~/.config/nexovian/temp_screenshot.png")
     os.makedirs(os.path.dirname(temp_img_path), exist_ok=True)
     
@@ -286,78 +280,10 @@ def read_screen(instruction="Explain what is on the screen"):
         except OSError:
             pass
             
-    # Send to Gemini API
-    headers = {"Content-Type": "application/json"}
-    
-    prompt_text = (
-        f"You are a helpful desktop assistant. The user wants you to analyze their screen.\n"
-        f"User query: {instruction}\n\n"
-        f"Please provide your analysis in two sections exactly:\n"
-        f"Summary: A concise 1-2 sentence overview suitable for text-to-speech. Do not include asterisks or formatting symbols in the summary.\n"
-        f"Details: A thorough, detailed breakdown of everything on the screen, including text, open applications, and user interface elements."
-    )
-    
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt_text},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/png",
-                            "data": img_base64
-                        }
-                    }
-                ]
-            }
-        ]
-    }
-    
-    gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
-    last_error_msg = ""
-    
-    for model in gemini_models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    return "Gemini API returned no analysis candidates."
-                    
-                text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                if not text_content:
-                    return "Gemini API returned empty explanation."
-                    
-                # Parse Summary and Details
-                summary = ""
-                details = ""
-                
-                if "Summary:" in text_content and "Details:" in text_content:
-                    try:
-                        summary = text_content.split("Summary:")[1].split("Details:")[0].strip()
-                        details = text_content.split("Details:")[1].strip()
-                    except Exception:
-                        pass
-                        
-                if not summary or not details:
-                    # Fallback if structure wasn't strictly followed
-                    summary = text_content[:150] + "..." if len(text_content) > 150 else text_content
-                    details = text_content
-                    
-                # Clean summary of formatting symbols
-                summary = summary.replace("*", "").replace("#", "").strip()
-                
-                return f"[SPOKEN]: {summary} [DISPLAY]: {details}"
-            else:
-                last_error_msg = f"Gemini API returned error code {resp.status_code}: {resp.text}"
-        except requests.exceptions.Timeout:
-            last_error_msg = "Gemini API request timed out."
-        except Exception as e:
-            last_error_msg = f"Error communicating with Gemini API: {str(e)}"
-            
-    return last_error_msg
+    # Delegate visual analysis to configured VisionProvider
+    from providers import get_vision_provider
+    provider = get_vision_provider()
+    return provider.analyze_screen(img_base64, instruction)
 
 
 def read_file(filename):
